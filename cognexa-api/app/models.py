@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy import Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -12,6 +12,8 @@ class User(Base):
     email = Column(String(150), unique=True, index=True)
     password = Column(String(255))
     plan = Column(String(20), default="community")
+    ai_credits_used = Column(Integer, default=0)
+    ai_credits_period_start = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     documents = relationship("Document", back_populates="owner")
@@ -30,6 +32,7 @@ class Document(Base):
     preview = Column(Text, nullable=True)
     size_bytes = Column(Integer, nullable=True)
     page_count = Column(Integer, nullable=True)
+    content_hash = Column(String(64), nullable=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     owner = relationship("User", back_populates="documents")
@@ -46,11 +49,22 @@ class Settings(Base):
     chunk_size = Column(Integer, default=500)
     chunk_overlap = Column(Integer, default=50)
     theme = Column(String(20), default="dark")
-    cline_api_key = Column(String(255), nullable=True)
-    integration_provider = Column(String(100), default="Cline")
-    integration_base_url = Column(String(255), nullable=True)
-    integration_model = Column(String(100), nullable=True)
+    email_notifications = Column(Boolean, default=True)
+    auto_reindex_stuck = Column(Boolean, default=False)
+    duplicate_detection = Column(Boolean, default=True)
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
+class Integration(Base):
+    __tablename__ = "integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider_name = Column(String(100), nullable=False)
+    api_key = Column(String(255), nullable=True)
+    base_url = Column(String(255), nullable=True)
+    model = Column(String(100), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
 
 class ChatMessage(Base):

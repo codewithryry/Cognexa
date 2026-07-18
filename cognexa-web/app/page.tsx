@@ -34,8 +34,70 @@ const FEATURES = [
   },
 ];
 
-const DEMO_VIDEO_URL =
-  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+const DEMO_VIDEO_URL = "/Product walkthrough.mp4";
+
+const TEAM = [
+  {
+    name: "Harlyn",
+    role: "Planning / PM + Docs",
+    color: "from-blue-500 to-blue-600",
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+      />
+    ),
+  },
+  {
+    name: "Jenilyn",
+    role: "Architecture & Design + UI",
+    color: "from-teal-500 to-teal-600",
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 6A2.25 2.25 0 016 3.75h12A2.25 2.25 0 0120.25 6v12A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18V6zM9.75 3.75v16.5"
+      />
+    ),
+  },
+  {
+    name: "Daryll",
+    role: "Development / Coding",
+    color: "from-cyan-500 to-cyan-600",
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
+      />
+    ),
+  },
+  {
+    name: "Reymel",
+    role: "RAG + Knowledgebase",
+    color: "from-purple-500 to-purple-600",
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20.25 6.375c0 1.036-3.694 1.875-8.25 1.875S3.75 7.41 3.75 6.375m16.5 0c0-1.036-3.694-1.875-8.25-1.875S3.75 5.34 3.75 6.375m16.5 0v11.25c0 1.035-3.694 1.875-8.25 1.875s-8.25-.84-8.25-1.875V6.375m16.5 3.75c0 1.035-3.694 1.875-8.25 1.875s-8.25-.84-8.25-1.875"
+      />
+    ),
+  },
+  {
+    name: "Vincent",
+    role: "Testing / QA + Observability",
+    color: "from-emerald-500 to-emerald-600",
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    ),
+  },
+];
 
 const STEPS = [
   {
@@ -70,10 +132,12 @@ const PLANS = [
     description: "For individuals running Cognexa locally on their own machine.",
     features: [
       "Up to 25 documents",
-      "500 MB storage",
-      "Unlimited questions (local model)",
+      "15 MB storage",
+      "Unlimited questions (local models only)",
+      "50 AI questions/month (OpenRouter)",
       "PDF, DOCX & image uploads",
-      "1 AI provider connection",
+      "Access to free AI models via OpenRouter",
+      "Standard indexing & retrieval speed",
     ],
     cta: "Get Started",
     highlighted: false,
@@ -82,12 +146,12 @@ const PLANS = [
     name: "Pro",
     price: "$19",
     period: "/month",
-    description: "For power users who want more room and any AI model they like.",
+    description: "For power users who need more AI usage and provider flexibility.",
     features: [
-      "Unlimited documents",
+      "Up to 100 documents",
       "10 GB storage",
-      "Unlimited questions",
-      "Connect any AI provider — OpenAI, Anthropic, Cohere, Gemini, Groq & more",
+      "Unlimited AI questions (using your own API usage)",
+      "Connect up to 3 AI providers (OpenAI, Anthropic, Cohere, Gemini, Groq, OpenRouter & more)",
       "Priority indexing & faster retrieval",
       "Email support",
     ],
@@ -95,18 +159,19 @@ const PLANS = [
     highlighted: true,
   },
   {
-    name: "Team",
+    name: "Unlimited",
     price: "$49",
     period: "/month",
-    description: "For small teams sharing one knowledge base across projects.",
+    description: "For power teams who want no ceilings at all.",
     features: [
-      "Everything in Pro",
-      "Unlimited storage",
-      "Up to 10 team members",
-      "Shared knowledge bases & permissions",
+      "Unlimited documents (Fair Use Policy)",
+      "Unlimited storage (Fair Use Policy)",
+      "Unlimited AI questions (using your own API usage)",
+      "Unlimited AI provider connections",
+      "Priority indexing & faster retrieval",
       "Priority support",
     ],
-    cta: "Contact Us",
+    cta: "Upgrade to Unlimited",
     highlighted: false,
   },
 ];
@@ -230,9 +295,6 @@ export default function Home() {
               <source src={DEMO_VIDEO_URL} type="video/mp4" />
             </video>
           </div>
-          <p className="mt-2 text-center text-xs text-gray-500 dark:text-slate-500">
-            Product walkthrough placeholder — swap in your own demo recording.
-          </p>
         </div>
       </div>
 
@@ -418,6 +480,39 @@ export default function Home() {
           ))}
         </div>
       </div>
+{/* 
+      <div className="mx-auto max-w-6xl px-6 py-16">
+        <h2 className="text-center text-2xl font-bold text-gray-900 sm:text-3xl dark:text-white">
+         Meet Our Team
+        </h2>
+        <div className="mx-auto mt-10 grid max-w-5xl gap-5 sm:grid-cols-2 lg:grid-cols-5">
+          {TEAM.map((member) => (
+            <div
+              key={member.name}
+              className="flex flex-col items-center rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-white/10 dark:bg-white/[0.03]"
+            >
+              <div
+                className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${member.color} text-white shadow-md`}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.75}
+                  stroke="currentColor"
+                  className="h-5 w-5"
+                >
+                  {member.icon}
+                </svg>
+              </div>
+              <h3 className="mt-4 text-sm font-bold text-gray-900 dark:text-white">
+                {member.name}
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">{member.role}</p>
+            </div>
+          ))}
+        </div>
+      </div> */}
 
       <div className="mx-auto max-w-6xl px-6 py-16">
         <div className="rounded-3xl border border-gray-200 bg-gradient-to-br from-indigo-50 via-white to-fuchsia-50 p-10 text-center shadow-sm dark:border-white/10 dark:from-indigo-500/10 dark:via-white/[0.02] dark:to-fuchsia-500/10 dark:shadow-xl">
@@ -442,7 +537,7 @@ export default function Home() {
 
       <footer className="border-t border-gray-200 px-6 py-8 dark:border-white/5">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-sm text-gray-500 sm:flex-row dark:text-slate-500">
-          <span>© {new Date().getFullYear()} Cognexa. Self-hosted RAG platform.</span>
+          <span>© {new Date().getFullYear()} Cognexa. Self-hosted RAG platform. </span>
           <span>Built with Next.js, FastAPI, ChromaDB & Ollama.</span>
         </div>
       </footer>

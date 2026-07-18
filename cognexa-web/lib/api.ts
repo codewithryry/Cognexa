@@ -1,4 +1,4 @@
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export function getToken() {
   if (typeof window === "undefined") return null;
@@ -116,7 +116,9 @@ export async function uploadDocument(file: File) {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || "Upload failed.");
+    const error = new Error(err.detail || "Upload failed.") as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
 
   return response.json();
@@ -143,6 +145,20 @@ export async function deleteDocument(id: number) {
 
   if (!response.ok) {
     throw new Error("Failed to delete document.");
+  }
+
+  return response.json();
+}
+
+export async function reindexDocument(id: number) {
+  const response = await fetch(`${API_URL}/documents/${id}/reindex`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to re-index document.");
   }
 
   return response.json();
@@ -179,10 +195,14 @@ export async function askAIStream(
   question: string,
   documentIds: number[] | undefined,
   handlers: AskStreamHandlers,
-  source: "auto" | "local" | "integration" = "auto"
+  source: "auto" | "local" | "integration" = "auto",
+  integrationId?: number
 ) {
   const params = new URLSearchParams({ question, source });
   documentIds?.forEach((id) => params.append("document_ids", String(id)));
+  if (source === "integration" && integrationId != null) {
+    params.append("integration_id", String(integrationId));
+  }
 
   const response = await fetch(`${API_URL}/ask?${params.toString()}`, {
     method: "POST",
@@ -270,6 +290,9 @@ export interface SettingsPayload {
   chunk_size: number;
   chunk_overlap: number;
   theme: string;
+  email_notifications: boolean;
+  auto_reindex_stuck: boolean;
+  duplicate_detection: boolean;
 }
 
 export async function updateSettings(settings: SettingsPayload) {
@@ -286,50 +309,66 @@ export async function updateSettings(settings: SettingsPayload) {
   return response.json();
 }
 
-// Chatbot integration (Cline or any other API-key/local based assistant)
-export interface ClinePayload {
-  connected: boolean;
-  cline_api_key: string | null;
+// Chatbot integrations (Cline, or any other API-key/local based assistant).
+// A user can save multiple, and pick which one to use per-question in chat.
+export interface IntegrationPayload {
+  id: number;
   provider_name: string;
   base_url: string | null;
   model: string | null;
+  connected: boolean;
+  created_at: string | null;
 }
 
-export interface ClineIntegrationInput {
-  apiKey: string | null;
+export interface IntegrationInput {
   providerName: string;
+  apiKey: string | null;
   baseUrl: string | null;
   model: string | null;
 }
 
-export async function getClineIntegration(): Promise<ClinePayload> {
-  const response = await fetch(`${API_URL}/integrations/cline`, {
+export async function getIntegrations(): Promise<IntegrationPayload[]> {
+  const response = await fetch(`${API_URL}/integrations`, {
     headers: authHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to load chatbot integration.");
+    throw new Error("Failed to load chatbot integrations.");
   }
 
   return response.json();
 }
 
-export async function updateClineIntegration(
-  input: ClineIntegrationInput
-): Promise<ClinePayload> {
-  const response = await fetch(`${API_URL}/integrations/cline`, {
-    method: "PUT",
+export async function createIntegration(
+  input: IntegrationInput
+): Promise<IntegrationPayload> {
+  const response = await fetch(`${API_URL}/integrations`, {
+    method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
-      cline_api_key: input.apiKey,
-      provider_name: input.providerName || "Cline",
+      provider_name: input.providerName,
+      api_key: input.apiKey,
       base_url: input.baseUrl,
       model: input.model,
     }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to save chatbot integration.");
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to save chatbot integration.");
+  }
+
+  return response.json();
+}
+
+export async function deleteIntegration(id: number) {
+  const response = await fetch(`${API_URL}/integrations/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to remove chatbot integration.");
   }
 
   return response.json();
@@ -342,6 +381,8 @@ export interface PlanPayload {
   max_storage_bytes: number | null;
   document_count: number;
   storage_bytes: number;
+  max_ai_credits: number | null;
+  ai_credits_remaining: number | null;
 }
 
 export async function getBillingPlan(): Promise<PlanPayload> {
@@ -391,6 +432,91 @@ export async function getStats() {
 
   if (!response.ok) {
     throw new Error("Failed to load stats.");
+  }
+
+  return response.json();
+}
+
+// Data management
+function downloadBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function exportKnowledgeBase() {
+  const response = await fetch(`${API_URL}/data/export`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to export knowledge base.");
+  }
+
+  downloadBlob(await response.blob(), "cognexa_knowledge_base.zip");
+}
+
+export async function backupAccount() {
+  const response = await fetch(`${API_URL}/data/backup`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to create backup.");
+  }
+
+  downloadBlob(await response.blob(), "cognexa_backup.json");
+}
+
+export interface RestoreResult {
+  restored_chat_messages: number;
+  restored_integrations: number;
+}
+
+export async function restoreAccount(file: File): Promise<RestoreResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_URL}/data/restore`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to restore backup.");
+  }
+
+  return response.json();
+}
+
+export async function deleteAllDocuments() {
+  const response = await fetch(`${API_URL}/documents`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete all documents.");
+  }
+
+  return response.json();
+}
+
+export async function deleteAccount() {
+  const response = await fetch(`${API_URL}/account`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete account.");
   }
 
   return response.json();

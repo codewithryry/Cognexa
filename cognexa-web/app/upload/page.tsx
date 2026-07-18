@@ -9,6 +9,7 @@ interface UploadResult {
   filename: string;
   characters: number;
   chunks_saved: number;
+  processing?: boolean;
   preview: string;
 }
 
@@ -64,7 +65,7 @@ export default function UploadPage() {
       return;
     }
     if (limitReached) {
-      notify("You've reached your plan's limit. Upgrade to upload more.", "error");
+      setCheckoutOpen(true);
       return;
     }
     setSelectedFile(file);
@@ -94,11 +95,23 @@ export default function UploadPage() {
 
       notify("Document uploaded successfully!", "success");
     } catch (error) {
-      console.error(error);
-      notify(
-        error instanceof Error ? error.message : "Upload failed. Please try again.",
-        "error"
-      );
+      const status = error instanceof Error ? (error as Error & { status?: number }).status : undefined;
+      const isPlanLimitError =
+        error instanceof Error && /plan limit reached|storage limit reached/i.test(error.message);
+      // 4xx responses (duplicate detected, plan limits, unsupported file type, etc.)
+      // are expected, already-handled outcomes communicated via toast/modal, not bugs
+      // worth surfacing in the console — only log genuinely unexpected failures.
+      const isExpected = status !== undefined && status < 500;
+
+      if (isPlanLimitError) {
+        setCheckoutOpen(true);
+      } else {
+        if (!isExpected) console.error(error);
+        notify(
+          error instanceof Error ? error.message : "Upload failed. Please try again.",
+          "error"
+        );
+      }
       loadPlan();
     } finally {
       setUploading(false);
@@ -202,8 +215,8 @@ export default function UploadPage() {
 
       {checkoutOpen && (
         <DemoCheckoutModal
-          plan="pro"
-          price="$19/month"
+          plan={plan?.plan === "pro" ? "team" : "pro"}
+          price={plan?.plan === "pro" ? "$49/month" : "$19/month"}
           onClose={() => setCheckoutOpen(false)}
           onSubscribed={() => {
             setCheckoutOpen(false);
@@ -228,7 +241,8 @@ export default function UploadPage() {
             </p>
 
             <p>
-              <strong>Chunks Saved:</strong> {result.chunks_saved}
+              <strong>Status:</strong>{" "}
+              {result.processing ? "Queued for indexing..." : `Indexed (${result.chunks_saved} chunks)`}
             </p>
           </div>
 

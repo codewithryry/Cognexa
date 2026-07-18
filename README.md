@@ -1,4 +1,4 @@
-# Cognexa Documentation
+# Cognexa
 
 Cognexa is a self-hosted AI knowledge base. Users upload documents (PDF, DOCX,
 images), the system indexes them for semantic search, and a chat interface
@@ -141,9 +141,9 @@ npm run dev
 ```
 Runs at `http://localhost:3000`.
 
-The frontend's API base URL is hardcoded in `cognexa-web/lib/api.ts`
-(`API_URL = "http://127.0.0.1:8000"`) — change this if the backend runs
-somewhere else.
+The frontend's API base URL is read from `NEXT_PUBLIC_API_URL` (see
+`cognexa-web/.env.example`; defaults to `http://127.0.0.1:8000` if unset) —
+set this if the backend runs somewhere else.
 
 ---
 
@@ -204,12 +204,7 @@ Add the extension check and text-extraction branch in the `/upload` route in
 ## 7. Known limitations / things to revisit
 
 - Image OCR requires installing the Tesseract binary separately; without it,
-  images upload fine but contribute no searchable text.
-- The `API_URL` in `lib/api.ts` is hardcoded rather than driven by an
-  environment variable — fine for local development, but should be
-  parameterized before deploying anywhere else.
-- JWT secret key in `cognexa-api/app/auth.py` is a hardcoded development
-  value — replace it with a securely generated secret (e.g. via environment
-  variable) before any real deployment.
+  images upload fine but contribute no searchable text (the upload itself
+  degrades gracefully — it just skips OCR rather than failing).
 - No password-reset flow yet (only sign up / log in / change password while
   logged in).

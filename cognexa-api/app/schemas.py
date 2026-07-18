@@ -56,6 +56,9 @@ class SettingsIn(BaseModel):
     chunk_size: int
     chunk_overlap: int
     theme: str
+    email_notifications: bool = True
+    auto_reindex_stuck: bool = False
+    duplicate_detection: bool = True
 
 
 class SettingsOut(SettingsIn):
@@ -63,19 +66,20 @@ class SettingsOut(SettingsIn):
         from_attributes = True
 
 
-class ClineSettingsIn(BaseModel):
-    cline_api_key: str | None = None
-    provider_name: str = "Cline"
+class IntegrationIn(BaseModel):
+    provider_name: str
+    api_key: str | None = None
     base_url: str | None = None
     model: str | None = None
 
 
-class ClineSettingsOut(BaseModel):
+class IntegrationOut(BaseModel):
+    id: int
+    provider_name: str
+    base_url: str | None = None
+    model: str | None = None
     connected: bool
-    cline_api_key: str | None = None
-    provider_name: str = "Cline"
-    base_url: str | None = None
-    model: str | None = None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -92,6 +96,8 @@ class PlanOut(BaseModel):
     max_storage_bytes: int | None
     document_count: int
     storage_bytes: int
+    max_ai_credits: int | None = None
+    ai_credits_remaining: int | None = None
 
 
 class SubscribeIn(BaseModel):

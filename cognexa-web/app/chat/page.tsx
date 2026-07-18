@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { askAIStream, clearChatHistory, getChatHistory, getClineIntegration } from "@/lib/api";
+import { askAIStream, clearChatHistory, getChatHistory, getIntegrations, IntegrationPayload } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
 import DocumentFilter from "@/components/DocumentFilter";
 
@@ -32,17 +32,26 @@ function stripMarkdown(text: string) {
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [asking, setAsking] = useState(false);
   const [scopedDocIds, setScopedDocIds] = useState<number[]>([]);
   const [source, setSource] = useState<"auto" | "local" | "integration">("auto");
-  const [integration, setIntegration] = useState<{
-    connected: boolean;
-    provider_name: string;
-    model: string | null;
-  } | null>(null);
+  const [integrations, setIntegrations] = useState<IntegrationPayload[]>([]);
+  const [selectedIntegrationId, setSelectedIntegrationId] = useState<number | null>(null);
+
+  const selectedIntegration =
+    integrations.find((i) => i.id === selectedIntegrationId) ?? null;
+  const defaultIntegration = integrations[0] ?? null;
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const providerMenuRef = useRef<HTMLDivElement>(null);
@@ -76,15 +85,9 @@ export default function ChatPage() {
       )
       .finally(() => setLoading(false));
 
-    getClineIntegration()
-      .then((data) =>
-        setIntegration({
-          connected: data.connected,
-          provider_name: data.provider_name,
-          model: data.model,
-        })
-      )
-      .catch(() => setIntegration(null));
+    getIntegrations()
+      .then(setIntegrations)
+      .catch(() => setIntegrations([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -95,6 +98,14 @@ export default function ChatPage() {
   async function handleSend(question?: string) {
     const q = (question ?? input).trim();
     if (!q || asking) return;
+
+    if (source === "auto" && !defaultIntegration) {
+      notify(
+        "Add an AI provider under Settings > Integrations first, or switch to Local (Ollama) from the provider menu.",
+        "error"
+      );
+      return;
+    }
 
     setInput("");
     setAsking(true);
@@ -134,7 +145,8 @@ export default function ChatPage() {
             );
           },
         },
-        source
+        source,
+        selectedIntegration?.id
       );
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m.id !== questionId && m.id !== answerId));
@@ -261,9 +273,9 @@ export default function ChatPage() {
                 <span className="max-w-[9rem] truncate">
                   {source === "local"
                     ? "Local (llama3.2)"
-                    : source === "integration" && integration
-                    ? `${integration.provider_name}${integration.model ? ` (${integration.model})` : ""}`
-                    : `Auto${integration?.connected ? ` (${integration.provider_name})` : " (Local)"}`}
+                    : source === "integration" && selectedIntegration
+                    ? `${selectedIntegration.provider_name}${selectedIntegration.model ? ` (${selectedIntegration.model})` : ""}`
+                    : `Auto${defaultIntegration ? ` (${defaultIntegration.provider_name})` : " (no provider)"}`}
                 </span>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -292,7 +304,7 @@ export default function ChatPage() {
                         : "text-gray-600 dark:text-gray-300"
                     }`}
                   >
-                    Auto{integration?.connected ? ` (${integration.provider_name})` : " (Local)"}
+                    Auto{defaultIntegration ? ` (${defaultIntegration.provider_name})` : " (no provider)"}
                   </button>
 
                   <button
@@ -309,22 +321,24 @@ export default function ChatPage() {
                     Local (llama3.2)
                   </button>
 
-                  {integration?.connected && (
+                  {integrations.map((i) => (
                     <button
+                      key={i.id}
                       onClick={() => {
                         setSource("integration");
+                        setSelectedIntegrationId(i.id);
                         setProviderMenuOpen(false);
                       }}
                       className={`w-full truncate rounded-xl px-3 py-2 text-left text-sm transition hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                        source === "integration"
+                        source === "integration" && selectedIntegrationId === i.id
                           ? "bg-gray-100 dark:bg-gray-800 font-medium text-gray-900 dark:text-gray-100"
                           : "text-gray-600 dark:text-gray-300"
                       }`}
                     >
-                      {integration.provider_name}
-                      {integration.model ? ` (${integration.model})` : ""}
+                      {i.provider_name}
+                      {i.model ? ` (${i.model})` : ""}
                     </button>
-                  )}
+                  ))}
                 </div>
               )}
             </div>

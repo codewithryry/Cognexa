@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 
-SECRET_KEY = "cognexa-dev-secret-key-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "cognexa-dev-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 

@@ -28,7 +28,7 @@ export default function DemoCheckoutModal({
 
     try {
       await subscribePlan({ plan, cardNumber, cardExpiry, cardCvc });
-      notify(`Subscribed to the ${plan === "pro" ? "Pro" : "Team"} plan.`, "success");
+      notify(`Subscribed to the ${plan === "pro" ? "Pro" : "Unlimited"} plan.`, "success");
       onSubscribed();
     } catch (err) {
       notify(err instanceof Error ? err.message : "Failed to subscribe.", "error");
@@ -49,7 +49,7 @@ export default function DemoCheckoutModal({
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Upgrade to {plan === "pro" ? "Pro" : "Team"}
+              Upgrade to {plan === "pro" ? "Pro" : "Unlimited"}
             </h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
               {price} — demo checkout, no real charge.

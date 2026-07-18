@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteDocument, downloadDocument, getDocuments } from "@/lib/api";
+import {
+  deleteDocument,
+  downloadDocument,
+  getDocuments,
+  getSettings,
+  reindexDocument,
+  SettingsPayload,
+} from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
 
 interface DocumentItem {
@@ -17,6 +24,7 @@ interface DocumentItem {
 }
 
 type SortKey = "newest" | "oldest" | "name" | "chunks";
+type ViewMode = "grid" | "list";
 
 const PAGE_SIZE = 6;
 
@@ -55,9 +63,15 @@ export default function KnowledgeBasePage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("newest");
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [page, setPage] = useState(1);
+  const [settings, setSettings] = useState<SettingsPayload | null>(null);
+  const [reindexingId, setReindexingId] = useState<number | null>(null);
   const { confirm, notify } = useDialog();
   const router = useRouter();
+
+  const stuckSinceRef = useRef<Map<number, number>>(new Map());
+  const autoRetriedRef = useRef<Set<number>>(new Set());
 
   const fileTypes = useMemo(
     () => Array.from(new Set(documents.map((d) => d.file_type).filter(Boolean))) as string[],
@@ -112,8 +126,60 @@ export default function KnowledgeBasePage() {
 
   useEffect(() => {
     loadDocuments();
+    getSettings()
+      .then(setSettings)
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const STUCK_RETRY_MS = 8000;
+
+  useEffect(() => {
+    const stuckDocs = documents.filter((doc) => doc.chunks === 0);
+    if (stuckDocs.length === 0) return;
+
+    const now = Date.now();
+    for (const doc of stuckDocs) {
+      if (!stuckSinceRef.current.has(doc.id)) {
+        stuckSinceRef.current.set(doc.id, now);
+        continue;
+      }
+
+      const stuckSince = stuckSinceRef.current.get(doc.id)!;
+      if (
+        settings?.auto_reindex_stuck &&
+        !autoRetriedRef.current.has(doc.id) &&
+        now - stuckSince >= STUCK_RETRY_MS
+      ) {
+        autoRetriedRef.current.add(doc.id);
+        reindexDocument(doc.id)
+          .then(() => notify(`Auto re-indexing "${doc.filename}"...`, "info"))
+          .catch(() => {});
+      }
+    }
+
+    const interval = setInterval(() => {
+      getDocuments()
+        .then(setDocuments)
+        .catch(() => {});
+    }, 3000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents, settings?.auto_reindex_stuck]);
+
+  async function handleReindex(id: number, filename: string) {
+    setReindexingId(id);
+    try {
+      await reindexDocument(id);
+      notify(`Re-indexing "${filename}"...`, "success");
+      loadDocuments();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to re-index document.", "error");
+    } finally {
+      setReindexingId(null);
+    }
+  }
 
   async function handleDelete(id: number, filename: string) {
     const confirmed = await confirm({
@@ -140,6 +206,77 @@ export default function KnowledgeBasePage() {
     } catch (err) {
       notify(err instanceof Error ? err.message : "Failed to download document.", "error");
     }
+  }
+
+  function renderActions(doc: DocumentItem, status: string) {
+    return (
+      <>
+        {status === "Processing" && (
+          <button
+            onClick={() => handleReindex(doc.id, doc.filename)}
+            disabled={reindexingId === doc.id}
+            title="Re-index"
+            className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.75}
+              stroke="currentColor"
+              className={`h-4 w-4 ${reindexingId === doc.id ? "animate-spin" : ""}`}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+              />
+            </svg>
+          </button>
+        )}
+
+        <button
+          onClick={() => setPreviewDoc(doc)}
+          title="View"
+          className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => router.push(`/chat?doc=${doc.id}`)}
+          title="Ask AI"
+          className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm3.75 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm3.75 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.5-1.185C3.766 16.505 3 14.795 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => handleDownload(doc.id, doc.filename)}
+          title="Download"
+          className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v1.5A2.25 2.25 0 005.25 20.25h13.5A2.25 2.25 0 0021 18v-1.5M7.5 12L12 16.5m0 0L16.5 12M12 16.5V3" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => handleDelete(doc.id, doc.filename)}
+          title="Delete"
+          className="flex items-center justify-center rounded-xl border border-red-200 dark:border-red-900 py-2 text-red-600 dark:text-red-400 transition hover:bg-red-50 dark:hover:bg-red-500/10"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.166L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+          </svg>
+        </button>
+      </>
+    );
   }
 
   return (
@@ -170,30 +307,74 @@ export default function KnowledgeBasePage() {
           </div>
 
           {fileTypes.length > 1 && (
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-600 dark:text-gray-300 shadow-sm outline-none"
-            >
-              <option value="all">All types</option>
-              {fileTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type.toUpperCase()}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="w-full appearance-none rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 py-2.5 pl-3 pr-9 text-sm text-gray-600 dark:text-gray-300 shadow-sm outline-none"
+              >
+                <option value="all">All types</option>
+                {fileTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
           )}
 
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-sm text-gray-600 dark:text-gray-300 shadow-sm outline-none"
+          <div className="relative">
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="w-full appearance-none rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 py-2.5 pl-3 pr-9 text-sm text-gray-600 dark:text-gray-300 shadow-sm outline-none"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name (A-Z)</option>
+              <option value="chunks">Most chunks</option>
+            </select>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+            >
+              <path
+                fillRule="evenodd"
+                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </div>
+
+          <button
+            onClick={() => setViewMode((prev) => (prev === "grid" ? "list" : "grid"))}
+            title={viewMode === "grid" ? "Switch to list view" : "Switch to grid view"}
+            className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2.5 text-gray-500 dark:text-gray-400 shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800"
           >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-            <option value="name">Name (A-Z)</option>
-            <option value="chunks">Most chunks</option>
-          </select>
+            {viewMode === "grid" ? (
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            )}
+          </button>
         </div>
       )}
 
@@ -225,9 +406,60 @@ export default function KnowledgeBasePage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            className={
+              viewMode === "grid"
+                ? "grid gap-5 md:grid-cols-2 xl:grid-cols-3"
+                : "flex flex-col gap-3"
+            }
+          >
             {pagedDocuments.map((doc) => {
               const status = doc.chunks > 0 ? "Indexed" : "Processing";
+
+              if (viewMode === "list") {
+                return (
+                  <div
+                    key={doc.id}
+                    className="flex flex-wrap items-center gap-4 rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm"
+                  >
+                    <span className="shrink-0 rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {doc.file_type ?? "file"}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <h2
+                        onClick={() => setPreviewDoc(doc)}
+                        className="cursor-pointer truncate text-sm font-semibold text-gray-900 dark:text-gray-100 hover:underline"
+                      >
+                        {doc.filename}
+                      </h2>
+                      <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {doc.chunks} chunks · {formatBytes(doc.size_bytes)}
+                        {doc.page_count != null ? ` · ${doc.page_count} pages` : ""} ·{" "}
+                        {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "Unknown"}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
+                        status === "Indexed"
+                          ? "bg-green-100 dark:bg-green-500/10 text-green-700 dark:text-green-400"
+                          : "bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                      }`}
+                    >
+                      {status}
+                    </span>
+
+                    <div
+                      className={`grid shrink-0 gap-2 ${status === "Processing" ? "grid-cols-5" : "grid-cols-4"}`}
+                      style={{ width: status === "Processing" ? "10rem" : "8rem" }}
+                    >
+                      {renderActions(doc, status)}
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={doc.id}
@@ -280,47 +512,8 @@ export default function KnowledgeBasePage() {
                     </p>
                   </div>
 
-                  <div className="mt-5 grid grid-cols-4 gap-2">
-                    <button
-                      onClick={() => setPreviewDoc(doc)}
-                      title="View"
-                      className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    </button>
-
-                    <button
-                      onClick={() => router.push(`/chat?doc=${doc.id}`)}
-                      title="Ask AI"
-                      className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm3.75 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm3.75 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.5-1.185C3.766 16.505 3 14.795 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-                      </svg>
-                    </button>
-
-                    <button
-                      onClick={() => handleDownload(doc.id, doc.filename)}
-                      title="Download"
-                      className="flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 py-2 text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v1.5A2.25 2.25 0 005.25 20.25h13.5A2.25 2.25 0 0021 18v-1.5M7.5 12L12 16.5m0 0L16.5 12M12 16.5V3" />
-                      </svg>
-                    </button>
-
-                    <button
-                      onClick={() => handleDelete(doc.id, doc.filename)}
-                      title="Delete"
-                      className="flex items-center justify-center rounded-xl border border-red-200 dark:border-red-900 py-2 text-red-600 dark:text-red-400 transition hover:bg-red-50 dark:hover:bg-red-500/10"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.166L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                      </svg>
-                    </button>
+                  <div className={`mt-5 grid gap-2 ${status === "Processing" ? "grid-cols-5" : "grid-cols-4"}`}>
+                    {renderActions(doc, status)}
                   </div>
                 </div>
               );

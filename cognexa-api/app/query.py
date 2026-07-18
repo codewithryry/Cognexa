@@ -1,6 +1,7 @@
 import json
 
 import chromadb
+import httpx
 import requests
 from sentence_transformers import SentenceTransformer
 import ollama
@@ -36,13 +37,50 @@ SYSTEM_PROMPT = (
 )
 
 
+def extract_provider_error_message(payload):
+    """Digs the most specific human-readable message out of a provider error
+    body. OpenRouter nests the upstream provider's own error as a JSON string
+    under error.metadata.raw, which is usually more useful than its own
+    generic "Provider returned error" wrapper message."""
+    if not isinstance(payload, dict):
+        return None
+
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+
+    raw = error.get("metadata", {}).get("raw") if isinstance(error.get("metadata"), dict) else None
+    if isinstance(raw, str):
+        try:
+            raw_parsed = json.loads(raw)
+            nested_message = raw_parsed.get("error", {}).get("message")
+            if nested_message:
+                return nested_message
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    return error.get("message")
+
+
 def raise_for_status_verbose(response):
     if response.ok:
         return
+
     try:
-        detail = response.json()
+        payload = response.json()
     except ValueError:
-        detail = response.text
+        payload = None
+
+    message = extract_provider_error_message(payload)
+
+    if response.status_code == 402:
+        friendly = message or "The AI provider rejected the request for insufficient credits/quota."
+        raise requests.HTTPError(f"This AI provider is out of credits: {friendly}")
+
+    if message:
+        raise requests.HTTPError(f"{response.status_code} {response.reason}: {message}")
+
+    detail = payload if payload is not None else response.text
     raise requests.HTTPError(
         f"{response.status_code} {response.reason} from {response.url}: {detail}"
     )
@@ -225,48 +263,86 @@ def search_document(question, user_id, document_ids=None, limit=8, pool_size=24,
         [question]
     ).tolist()
 
-    where = {"user_id": user_id}
+    if not document_ids:
+        # Discover every document the user has instead of relying on a single
+        # global similarity query, which lets one large/dominant document's
+        # chunks crowd the whole result pool and starve the others out before
+        # the per-document cap below ever gets a chance to run.
+        existing = collection.get(where={"user_id": user_id}, include=["metadatas"])
+        document_ids = sorted({
+            meta.get("document_id")
+            for meta in (existing.get("metadatas") or [])
+            if meta and meta.get("document_id") is not None
+        })
 
-    if document_ids:
-        where = {
-            "$and": [
-                {"user_id": user_id},
-                {"document_id": {"$in": document_ids}},
-            ]
-        }
+    # Candidate chunks grouped per document (each list already ordered by
+    # similarity rank), so we can distribute the final `limit` fairly across
+    # documents instead of a flat similarity-ranked list that lets earlier or
+    # more-similar documents crowd out the rest before a slice-to-limit.
+    per_doc_candidates = []
 
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=pool_size,
-        where=where,
-    )
+    if len(document_ids) > 1:
+        # Query each document separately so every document contributes to the
+        # candidate pool regardless of how its chunks rank against the others.
+        per_doc_pool = max(per_doc_cap, pool_size // max(len(document_ids), 1))
+        for doc_id in document_ids:
+            where = {"$and": [{"user_id": user_id}, {"document_id": doc_id}]}
+            results = collection.query(
+                query_embeddings=query_embedding,
+                n_results=per_doc_pool,
+                where=where,
+            )
+            docs = results["documents"][0] if results["documents"] else []
+            metas = results["metadatas"][0] if results["metadatas"] else []
+            per_doc_candidates.append(list(zip(docs, metas)))
+    else:
+        where = {"user_id": user_id}
+        if document_ids:
+            where = {
+                "$and": [
+                    {"user_id": user_id},
+                    {"document_id": {"$in": document_ids}},
+                ]
+            }
+        results = collection.query(
+            query_embeddings=query_embedding,
+            n_results=pool_size,
+            where=where,
+        )
+        docs = results["documents"][0] if results["documents"] else []
+        metas = results["metadatas"][0] if results["metadatas"] else []
+        grouped = {}
+        for doc, meta in zip(docs, metas):
+            doc_id = meta.get("document_id") if meta else None
+            grouped.setdefault(doc_id, []).append((doc, meta))
+        per_doc_candidates = list(grouped.values())
 
-    documents = results["documents"][0] if results["documents"] else []
-    metadatas = results["metadatas"][0] if results["metadatas"] else []
-
-    # Rank order from Chroma is purely by similarity, which can let one very
-    # relevant document crowd out other relevant documents. Cap how many
-    # chunks any single document contributes first so the final context pulls
-    # from multiple sources, then backfill remaining slots by rank.
+    # Round-robin one chunk per document per round (up to per_doc_cap rounds)
+    # so every document gets a turn before any one document's remaining
+    # chunks are considered, and truncation to `limit` can't wipe out an
+    # entire document just because it was queried/ranked later.
     selected_docs, selected_metas = [], []
-    leftover_docs, leftover_metas = [], []
-    counts = {}
 
-    for doc, meta in zip(documents, metadatas):
-        doc_id = meta.get("document_id") if meta else None
-        if counts.get(doc_id, 0) < per_doc_cap:
-            selected_docs.append(doc)
-            selected_metas.append(meta)
-            counts[doc_id] = counts.get(doc_id, 0) + 1
-        else:
-            leftover_docs.append(doc)
-            leftover_metas.append(meta)
+    for round_idx in range(per_doc_cap):
+        if len(selected_docs) >= limit:
+            break
+        for candidates in per_doc_candidates:
+            if len(selected_docs) >= limit:
+                break
+            if round_idx < len(candidates):
+                doc, meta = candidates[round_idx]
+                selected_docs.append(doc)
+                selected_metas.append(meta)
 
-    i = 0
-    while len(selected_docs) < limit and i < len(leftover_docs):
-        selected_docs.append(leftover_docs[i])
-        selected_metas.append(leftover_metas[i])
-        i += 1
+    if len(selected_docs) < limit:
+        for candidates in per_doc_candidates:
+            for doc, meta in candidates[per_doc_cap:]:
+                if len(selected_docs) >= limit:
+                    break
+                selected_docs.append(doc)
+                selected_metas.append(meta)
+            if len(selected_docs) >= limit:
+                break
 
     return selected_docs[:limit], selected_metas[:limit]
 
@@ -386,25 +462,35 @@ def generate_answer_stream(
 
     ollama_client = ollama.Client(host=ollama_url)
 
-    stream = ollama_client.chat(
-        model=llm_model,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            }
-        ],
-        stream=True,
-    )
+    try:
+        stream = ollama_client.chat(
+            model=llm_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                }
+            ],
+            stream=True,
+        )
 
-    for chunk in stream:
-        content = chunk.get("message", {}).get("content", "")
-        if content:
-            yield {"type": "token", "content": content}
+        for chunk in stream:
+            content = chunk.get("message", {}).get("content", "")
+            if content:
+                yield {"type": "token", "content": content}
+    except httpx.ConnectError:
+        yield {
+            "type": "token",
+            "content": (
+                "Local AI (Ollama) isn't running, so this question couldn't be answered. "
+                "Start Ollama on this machine, or add a provider under Settings > Integrations "
+                "and select it from the provider menu."
+            ),
+        }
 
 
 if __name__ == "__main__":
