@@ -1,6 +1,6 @@
 # Cognexa — User Manual
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Audience:** End users
 
 ---
@@ -65,7 +65,7 @@ The **Knowledge Base** page lists every document you've uploaded.
 - **Switch view**: click the grid/list icon (top right of the toolbar) to toggle between a card grid and a compact list.
 - **Actions** per document: View (preview), Ask AI (jump to chat scoped to this document), Download, Delete, and (if stuck) Re-index.
 
-Click a document's title (or the "View" action) to open a preview panel showing its extracted text preview, file type, size, page count, chunk count, and upload date.
+Click a document's title (or the "View" action) to open its dedicated detail page, showing type, status, size, page count, chunk count, upload date, and an extracted-content preview, with quick actions to re-index, Ask AI, download, or delete.
 
 ---
 
@@ -90,13 +90,37 @@ Click the trash icon in the chat input bar, and confirm, to permanently delete y
 ### 4.4 A Note on "List My Documents" Questions
 Questions like "List the documents I've uploaded" are answered directly from your account's document records, not by searching document content — so the answer is always complete and accurate, regardless of file type or size.
 
+### 4.5 Chat Sessions
+Every conversation you have is saved as a named session so you can come back to it later. From the Chat page you can start a new session, switch between past sessions, rename one, or delete one — your message history stays scoped to whichever session is open.
+
 ---
 
-## 5. Connecting an AI Provider (Chatbot Integration)
+## 5. Generating Reports
+
+The **Report** page turns your knowledge base or a past conversation into a clean, structured document.
+
+### 5.1 Generate from a Chat
+Pick any saved chat session and click **Generate Report** to turn that conversation into a report. Once generated, the report is cached — click **Preview** to reopen it instantly, or the refresh icon to regenerate it.
+
+### 5.2 Generate from Your Dataset
+Type a topic or broad question (e.g. "Week 2 Deliverables"), optionally scope it to specific documents using the document filter, and click **Generate Report**. This searches your documents directly — no chat history required.
+
+### 5.3 Working with a Report
+Once a report panel is open, you can:
+- **Copy** the plain-text report to your clipboard.
+- **Print** it directly from the browser.
+- **Download** it as `.txt` or `.md`.
+- **Export** it as a formatted `.docx` or `.pdf` file.
+
+Reports are saved to your account (so they survive across devices/browsers) and also cached locally for instant reload.
+
+---
+
+## 6. Connecting an AI Provider (Chatbot Integration)
 
 By default, Cognexa answers using a local model — no external AI provider is required. If you want to use a hosted AI model instead:
 
-1. Go to **Settings → Chatbot Integration**.
+1. Go to **Settings → Model Provider**.
 2. Choose a **Provider** (OpenAI, Anthropic Claude, Cohere, Google Gemini, OpenRouter, Cline, or a local Ollama/LM Studio endpoint).
 3. Enter your **API Key** (not required for local providers). If you don't have one, click the "Get one from *Provider*" link next to the field.
 4. Choose a **Model** from the dropdown, or enter a custom model ID.
@@ -104,7 +128,9 @@ By default, Cognexa answers using a local model — no external AI provider is r
 
 Your saved integration then appears as a selectable option in the Chat page's provider menu.
 
-### 5.1 How Many Providers Can I Connect?
+> If you're on the Community plan and haven't connected a provider yet, you'll see a one-time reminder pointing you to Settings → Model Provider (or suggesting OpenRouter, which is free) the first time you try to use the assistant.
+
+### 6.1 How Many Providers Can I Connect?
 
 | Plan | Saved Integrations |
 |---|---|
@@ -112,38 +138,37 @@ Your saved integration then appears as a selectable option in the Chat page's pr
 | Pro | Up to 3 |
 | Unlimited | Unlimited |
 
-### 5.2 Removing an Integration
-In Settings, click the trash icon next to a saved integration and confirm removal.
+### 6.2 Removing an Integration
+In Settings → Model Provider, click the trash icon next to a saved integration and confirm removal.
 
-### 5.3 Community Plan AI Usage
+### 6.3 Community Plan AI Usage
 Community accounts get **50 free AI questions per month** using OpenRouter's free models. Once used up, chat automatically falls back to the local model until your monthly allowance resets — you are never blocked from asking questions.
 
 ---
 
-## 6. Settings
+## 7. Settings
 
-### 6.1 Account
+Settings is now organized into focused pages, listed in a side navigation:
+
+### 7.1 Account
 Update your display name and password.
 
-### 6.2 General
-Configure the local Ollama URL/model, embedding model, chunk size/overlap, and light/dark theme.
+### 7.2 Model Provider
+Configure the local Ollama URL/model and embedding model, and manage your saved AI-provider integrations (see Section 6).
 
-### 6.3 Billing & Subscription
+### 7.3 Chat Channels
+Connect external chat surfaces so you can reach the assistant outside the web app. Telegram is shown as **"Coming soon."** Connection limits follow your plan (Community: 1, Pro: 5, Unlimited: unlimited).
+
+### 7.4 Billing
 View your current plan and usage (documents, storage, AI credits), and upgrade/downgrade between Community, Pro, and Unlimited. *(This is a demo checkout — no real payment is processed.)*
 
-### 6.4 Chatbot Integration
-See Section 5.
+### 7.5 Automation
+Configure chunk size/overlap, light/dark theme, email notification preferences, and toggle **Auto Re-index** and **Duplicate Detection** (see Sections 2.2–2.3). *(Note: no mail provider is connected yet — notification preferences are saved but no emails are currently sent.)*
 
-### 6.5 Notifications
-Toggle email notifications on/off. *(Note: no mail provider is connected yet — these preferences are saved but no emails are currently sent.)*
+### 7.6 Data Sources
+Connect external content sources so their material can be indexed alongside your uploaded documents. **GitHub** is available today (connect a repo URL or access token); **Google Drive** is shown as **"Coming soon."** Connection limits follow your plan (Community: 2, Pro: 10, Unlimited: unlimited).
 
-### 6.6 Automation
-Toggle **Auto Re-index** and **Duplicate Detection** (see Sections 2.2–2.3).
-
-### 6.7 Integrations (External Sources)
-Google Drive, GitHub, and Notion sync are shown as **"Coming soon"** — not yet available.
-
-### 6.8 Data Management
+### 7.7 Data Management
 - **Export Knowledge Base** — downloads a `.zip` of your uploaded document files plus a manifest.
 - **Backup** — downloads a `.json` snapshot of your settings, chat history, and saved integrations (API keys are excluded for security).
 - **Restore** — uploads a previously downloaded backup file, replacing your current settings, chat history, and integrations. *(You must re-enter API keys after restoring. Documents themselves are not restored — only their metadata is backed up, so re-upload the original files if needed.)*
@@ -152,7 +177,7 @@ Google Drive, GitHub, and Notion sync are shown as **"Coming soon"** — not yet
 
 ---
 
-## 7. Frequently Asked Questions
+## 8. Frequently Asked Questions
 
 **Q: Does my data leave my computer/server?**
 A: No, unless you explicitly connect an external AI provider (e.g. OpenAI) — in that case, only the question and retrieved document context are sent to that provider for generating an answer.
@@ -164,4 +189,7 @@ A: Your plan's storage allowance is full. Upgrade your plan, or delete unused do
 A: Enable Auto Re-index in Settings, or manually click the Re-index button on the document card.
 
 **Q: Can I use more than one AI provider?**
-A: Yes, subject to your plan's connection limit (see Section 5.1). Choose which one to use per question in the Chat page's provider menu.
+A: Yes, subject to your plan's connection limit (see Section 6.1). Choose which one to use per question in the Chat page's provider menu.
+
+**Q: I generated a report but closed the panel — where did it go?**
+A: Reports are saved to your account, not just your browser. Reopen the Report page and click "Preview" (for a chat-based report) or "View last report" (for a dataset/topic report) to bring it back.

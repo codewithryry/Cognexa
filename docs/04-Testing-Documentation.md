@@ -1,6 +1,6 @@
 # Cognexa — Testing Documentation
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Audience:** QA Engineers / Developers
 
 ---
@@ -8,7 +8,7 @@
 ## 1. Testing Strategy
 
 ### 1.1 Scope
-This document covers functional test cases for the Cognexa platform: authentication, document management, chat/retrieval, chatbot integrations, plan enforcement, AI credits, priority scheduling, and data management.
+This document covers functional test cases for the Cognexa platform: authentication, document management, chat/retrieval, chat sessions, report generation, chatbot integrations, data source and chat channel connections, plan enforcement, AI credits, priority scheduling, and data management.
 
 ### 1.2 Test Levels
 | Level | Approach |
@@ -74,6 +74,8 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 | KB-04 | Toggle grid/list view | P3 | Documents exist | 1. Click the grid/list toggle button. | Layout switches between card grid and compact list; icon reflects current mode. |
 | KB-05 | Preview a document | P2 | A document exists | 1. Click a document's title. | Preview panel opens showing type, status, size, pages, chunks, upload date, and text preview. |
 | KB-06 | Pagination | P3 | More than 6 documents (after filtering) | 1. Navigate using Previous/Next. | Correct page of results shown; buttons disabled at boundaries. |
+| KB-07 | Document detail page | P2 | A document exists | 1. Open `/knowledge-base/{id}` for that document. | Page shows type, status, size, page count, chunks, upload date, and extracted preview; Re-index (if Processing), Ask AI, Download, and Delete actions all work. |
+| KB-08 | Document detail page — not found | P3 | An invalid or deleted document id | 1. Open `/knowledge-base/{id}` with a non-existent id. | "Document not found" state shown with a link back to the Dataset. |
 
 ### 2.4 Chat / Retrieval
 
@@ -89,6 +91,9 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 | CHAT-08 | Clear chat history | P2 | Chat history exists | 1. Click the clear-history icon, confirm. | All prior messages removed; history empty on reload. |
 | CHAT-09 | External provider returns 402 (out of credits) | P2 | An integration connected to a provider with insufficient balance | 1. Ask a question using that provider. | User sees a clean message: "This AI provider is out of credits: <reason>" — not a raw JSON dump. |
 | CHAT-10 | Retrieval fairness across many documents | P2 | 5+ documents uploaded, one much larger/more relevant than others | 1. Ask a broad question spanning all documents. | Answer context includes chunks from multiple documents (round-robin), not only the single most-similar document. |
+| CHAT-11 | Create and switch chat sessions | P1 | Logged in | 1. Start a new chat session. 2. Ask a question. 3. Start another session. 4. Switch back to the first. | Each session keeps its own independent message history. |
+| CHAT-12 | Rename a chat session | P3 | A chat session exists | 1. Rename the session. | New title is saved and shown in the session list and on the Report page. |
+| CHAT-13 | Delete a chat session | P2 | A chat session exists | 1. Delete the session, confirm. | Session and its messages are removed; any cached report for that session is no longer retrievable via the session list. |
 
 ### 2.5 Chatbot Integrations & Plan Restrictions
 
@@ -103,7 +108,30 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 | INT-07 | Downgrade leaves a disallowed integration unusable | P2 | Pro plan with a non-OpenRouter integration, then downgrade to Community | 1. Downgrade to Community. 2. View integrations / attempt to chat with the old integration. | Integration shows as not connected; chat silently falls back to local rather than using the disallowed provider. |
 | INT-08 | API key link opens correct provider page | P3 | Any provider selected | 1. Click "Get one from <Provider>". | Opens that provider's actual API-key page in a new tab. |
 
-### 2.6 AI Credits (Community Plan)
+### 2.6 Report Generation
+
+| ID | Title | Priority | Preconditions | Steps | Expected Result |
+|---|---|---|---|---|---|
+| RPT-01 | Generate report from a chat session | P1 | A chat session with at least one Q&A exists | 1. Go to Report page. 2. Click "Generate Report" on that session. | Report panel opens with a structured summary and source list; report is cached (button now reads "Preview"). |
+| RPT-02 | Preview a cached session report | P2 | RPT-01 completed | 1. Click "Preview" on the same session. | Same report reopens instantly without a new generation call. |
+| RPT-03 | Regenerate a session report | P3 | RPT-01 completed | 1. Click the refresh icon next to "Preview". | A fresh report is generated and replaces the cached one. |
+| RPT-04 | Generate report from dataset/topic | P1 | At least one indexed document | 1. Enter a topic in "Generate from your Dataset". 2. Optionally scope to specific documents. 3. Click "Generate Report". | Report generated from a fresh similarity search over the dataset/scoped documents, not from chat history. |
+| RPT-05 | Report persists across reload | P2 | A report was generated | 1. Generate a report. 2. Reload the page. | Last-open report reappears immediately (localStorage), then reconciles with the server copy (`GET /reports`). |
+| RPT-06 | Export report as .docx / .pdf | P2 | A report is open | 1. Click ".docx", then ".pdf". | Each downloads a correctly formatted file containing the report text and sources. |
+| RPT-07 | Copy / print / download report | P3 | A report is open | 1. Click Copy, Print, ".txt", ".md" in turn. | Copy places markdown-stripped text on the clipboard; Print opens the browser print dialog; .txt/.md download the raw/markdown text. |
+
+### 2.7 Data Sources & Chat Channels
+
+| ID | Title | Priority | Preconditions | Steps | Expected Result |
+|---|---|---|---|---|---|
+| DS-01 | Connect GitHub data source | P2 | Under plan's `max_apps` limit | 1. Settings → Data Sources → connect GitHub with a repo URL/token. | Connection saved and listed. |
+| DS-02 | Data source connection limit reached | P2 | Plan's `max_apps` limit already reached | 1. Attempt another connection. | 402 rejected, naming the plan's app-connection limit. |
+| DS-03 | Google Drive shown as coming soon | P3 | Any plan | 1. Open Data Sources. | Google Drive option is visibly disabled/marked "Coming soon". |
+| CH-01 | Connect a chat channel | P2 | Under plan's `max_chat_channels` limit | 1. Settings → Chat Channels → connect (once available). | Connection saved and listed. |
+| CH-02 | Chat channel connection limit reached | P2 | Plan's `max_chat_channels` limit already reached | 1. Attempt another connection. | 402 rejected, naming the plan's chat-channel limit. |
+| CH-03 | Disconnect a data source / chat channel | P3 | A connection exists | 1. Click remove, confirm. | Connection removed from the list. |
+
+### 2.8 AI Credits (Community Plan)
 
 | ID | Title | Priority | Preconditions | Steps | Expected Result |
 |---|---|---|---|---|---|
@@ -112,7 +140,7 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 | CRED-03 | Monthly credit reset | P2 | Period start > 30 days ago | 1. Request `/billing/plan` or ask a question after the period elapses. | `ai_credits_used` resets to 0 and a new period starts. |
 | CRED-04 | Pro/Unlimited plans never metered | P2 | Pro or Unlimited plan | 1. Ask many questions via a connected integration. | No credit tracking/limiting applied at any point. |
 
-### 2.7 Billing (Demo Checkout)
+### 2.9 Billing (Demo Checkout)
 
 | ID | Title | Priority | Preconditions | Steps | Expected Result |
 |---|---|---|---|---|---|
@@ -120,7 +148,7 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 | BILL-02 | Upgrade to Unlimited | P2 | Any plan | 1. Complete checkout for Unlimited. | Plan changes to "team" (displayed as "Unlimited"). |
 | BILL-03 | Downgrade to Community | P2 | Pro or Unlimited plan | 1. Click "Downgrade to Community". | Plan reverts; usage bars reflect Community limits; any now-disallowed integrations become unusable (see INT-07). |
 
-### 2.8 Data Management
+### 2.10 Data Management
 
 | ID | Title | Priority | Preconditions | Steps | Expected Result |
 |---|---|---|---|---|---|
@@ -130,7 +158,7 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 | DATA-04 | Restore rejects invalid file | P3 | Any non-backup JSON/file | 1. Attempt to restore it. | 400 error: "That file isn't a valid Cognexa backup." |
 | DATA-05 | Delete account | P1 | Logged in | 1. Settings → Delete Account. 2. Confirm twice. | Account, documents, chat history, integrations, and settings permanently deleted; user is logged out. |
 
-### 2.9 Priority Scheduling (Backend/Integration Tests)
+### 2.11 Priority Scheduling (Backend/Integration Tests)
 
 | ID | Title | Priority | Preconditions | Steps | Expected Result |
 |---|---|---|---|---|---|
@@ -140,7 +168,7 @@ Legend — **Priority**: P1 (critical), P2 (major), P3 (minor).
 ---
 
 ## 3. Regression Suite
-The following test IDs form the minimum regression suite to run before every release: `AUTH-01, AUTH-03, DOC-01, DOC-05, DOC-06, DOC-07, CHAT-01, CHAT-03, INT-02, INT-03, CRED-01, CRED-02, BILL-01, DATA-05`.
+The following test IDs form the minimum regression suite to run before every release: `AUTH-01, AUTH-03, DOC-01, DOC-05, DOC-06, DOC-07, KB-07, CHAT-01, CHAT-03, CHAT-11, RPT-01, RPT-04, INT-02, INT-03, DS-02, CRED-01, CRED-02, BILL-01, DATA-05`.
 
 ## 4. Defect Reporting Template
 | Field | Description |

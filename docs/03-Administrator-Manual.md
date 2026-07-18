@@ -1,6 +1,6 @@
 # Cognexa — Administrator Manual
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Audience:** System administrators / DevOps
 
 ---
@@ -13,7 +13,7 @@ Cognexa consists of two independently deployable services plus supporting infras
 |---|---|---|
 | `cognexa-api` | FastAPI (Python), served via Uvicorn | Requires a MySQL database and local disk for uploads + ChromaDB |
 | `cognexa-web` | Next.js 16 | Statically hosts the UI, calls `cognexa-api` over HTTP |
-| MySQL | Relational database | Stores users, documents, settings, integrations, chat history |
+| MySQL | Relational database | Stores users, documents, settings, integrations, data-source connections, chat channels, chat sessions/history, and generated reports |
 | ChromaDB | Embedded vector database | Persisted to local disk (`app/vector_db`) — no separate service to run |
 | Ollama | Local LLM runtime | Must be installed and running for local-model chat/generation |
 
@@ -92,15 +92,15 @@ Plan enforcement is centralized in `app/main.py`:
 
 ```python
 PLAN_LIMITS = {
-    "community": {"max_documents": 25, "max_storage_bytes": 15 * 1024 * 1024},
-    "pro":       {"max_documents": 100, "max_storage_bytes": 10 * 1024 * 1024 * 1024},
-    "team":      {"max_documents": None, "max_storage_bytes": None},
+    "community": {"max_documents": 25, "max_storage_bytes": 15 * 1024 * 1024, "max_apps": 2, "max_chat_channels": 1},
+    "pro":       {"max_documents": 100, "max_storage_bytes": 10 * 1024 * 1024 * 1024, "max_apps": 10, "max_chat_channels": 5},
+    "team":      {"max_documents": None, "max_storage_bytes": None, "max_apps": None, "max_chat_channels": None},
 }
 INTEGRATION_LIMITS = {"community": 1, "pro": 3, "team": None}
 COMMUNITY_MONTHLY_AI_CREDITS = 50
 ```
 
-Note: the "Unlimited" plan is stored internally as `"team"`. Adjusting these constants and redeploying the API is sufficient to change plan limits platform-wide — no database migration is required.
+`max_apps` gates Data Source connections and `max_chat_channels` gates Chat Channel connections, in addition to the existing document/storage/AI-provider-integration limits. Note: the "Unlimited" plan is stored internally as `"team"`. Adjusting these constants and redeploying the API is sufficient to change plan limits platform-wide — no database migration is required.
 
 ### 5.2 Billing
 Billing is currently a **demo/simulated checkout** (`POST /billing/subscribe`) — no real payment processor is integrated. Any submitted card details are accepted and discarded; the plan change is applied immediately. Integrating a real payment provider (e.g. Stripe) is a prerequisite before production monetization.
@@ -120,6 +120,12 @@ API keys for connected AI providers are stored in the `integrations` table, scop
 
 ### 5.6 Document Indexing Pipeline
 Uploaded file text is extracted synchronously (fast) but chunking + embedding + vector storage is offloaded to the background `PriorityWorkerPool`. Administrators should ensure the host has sufficient CPU headroom for the embedding model (`sentence-transformers`, CPU-bound) under concurrent upload load.
+
+### 5.7 Report Generation
+`POST /report/session` and `POST /report/dataset` call out to the same AI-provider resolution path used by `/ask` (local Ollama or a saved integration), so report generation consumes AI credits/quota identically to a chat question. Generated reports are persisted in the `generated_reports` table (`GET /reports` lists them) so they survive across the user's devices/browsers, in addition to a client-side `localStorage` cache. `POST /report/export` renders the report to `.docx`/`.pdf` server-side on demand — it is not persisted separately from the underlying report text.
+
+### 5.8 Data Sources and Chat Channels
+`DataSourceConnection` (e.g. GitHub) and `ChatChannel` (e.g. Telegram) rows follow the same connect/list/delete pattern as `Integration`, gated by `max_apps` / `max_chat_channels` respectively (Section 5.1). Both are currently storage-only on the backend — connecting GitHub, Google Drive, or Telegram persists the connection/credential row but does not yet trigger any indexing or messaging integration; the UI marks Google Drive and Telegram as "Coming soon" for this reason, while GitHub is presented as available pending that backend work.
 
 ---
 

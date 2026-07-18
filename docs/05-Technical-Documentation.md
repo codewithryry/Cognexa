@@ -1,6 +1,6 @@
 # Cognexa — Technical Documentation
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Audience:** Software Engineers
 
 ---
@@ -24,10 +24,19 @@ Cognexa/
 │   ├── requirements.txt
 │   └── migration_*.sql          Hand-authored schema migrations for existing tables
 └── cognexa-web/                 Next.js frontend
-    ├── app/                     App Router pages (/, /login, /dashboard, /chat, /upload,
-    │                            /knowledge-base, /settings)
+    ├── app/                     App Router pages:
+    │                              /, /login, /dashboard, /chat, /upload, /report
+    │                              /knowledge-base, /knowledge-base/[id]
+    │                              /settings (layout + Account)
+    │                              /settings/model-provider
+    │                              /settings/chat-channels
+    │                              /settings/billing
+    │                              /settings/automation
+    │                              /settings/data-sources
+    │                              /settings/data-management
     ├── components/               Shared UI components (modals, filters, nav)
-    ├── lib/                      api.ts (typed API client), AuthContext, DialogContext
+    ├── lib/                      api.ts (typed API client), AuthContext, DialogContext,
+    │                            useModelSetupWarning (first-run provider-setup nudge)
     └── public/                   Static assets
 ```
 
@@ -90,15 +99,58 @@ Cognexa/
 | model | VARCHAR(100) (nullable) | |
 | created_at | TIMESTAMP | |
 
-### 2.5 `chat_messages`
+### 2.5 `data_source_connections`
 | Column | Type | Notes |
 |---|---|---|
 | id | INTEGER PK | |
 | user_id | INTEGER FK → users.id | |
+| source_name | VARCHAR(100) | e.g. `GitHub`, `Google Drive` |
+| credential | VARCHAR(255) (nullable) | Repo URL / access token / API key, as applicable |
+| created_at | TIMESTAMP | |
+
+### 2.6 `chat_channels`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| user_id | INTEGER FK → users.id | |
+| channel_name | VARCHAR(100) | e.g. `Telegram` |
+| bot_token | VARCHAR(255) (nullable) | |
+| created_at | TIMESTAMP | |
+
+Note: `ChatChannelOut.connected` is a derived/response-only field (not a stored column).
+
+### 2.7 `chat_sessions`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| user_id | INTEGER FK → users.id | |
+| title | VARCHAR(255) | |
+| created_at | TIMESTAMP | |
+| updated_at | TIMESTAMP | onupdate now() |
+
+### 2.8 `chat_messages`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| user_id | INTEGER FK → users.id | |
+| session_id | INTEGER FK → chat_sessions.id (nullable) | Groups messages into a resumable conversation |
 | question | TEXT | |
 | answer | TEXT | |
 | sources | TEXT (nullable) | Comma-separated filenames |
 | created_at | TIMESTAMP | |
+
+### 2.9 `generated_reports`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| user_id | INTEGER FK → users.id | |
+| session_id | INTEGER FK → chat_sessions.id (nullable) | Set when generated from a chat session — one row per session, upserted on regenerate |
+| topic | VARCHAR(255) (nullable) | Set when generated from a free-form dataset/topic query — one row per user, upserted on regenerate |
+| title | VARCHAR(255) | Display title (session title, or the topic string) |
+| report | TEXT | The generated report body |
+| sources | TEXT (nullable) | Comma-separated filenames used as context |
+| created_at | TIMESTAMP | |
+| updated_at | TIMESTAMP | onupdate now() — bumped on regenerate |
 
 ---
 
@@ -119,38 +171,66 @@ Base URL: configurable (default `http://127.0.0.1:8000`). All endpoints except `
 |---|---|---|
 | `POST /upload` | multipart file | `{id, filename, characters, chunks_saved: 0, processing: true, preview}` |
 | `GET /documents` | — | `DocumentOut[]` |
+| `GET /documents/{id}` | — | `DocumentOut` (404 if not found/not owned) — backs the document detail page |
 | `GET /documents/{id}/download` | — | File stream |
 | `POST /documents/{id}/reindex` | — | `{queued: true}` |
 | `DELETE /documents/{id}` | — | `{deleted: id}` |
 | `DELETE /documents` | — | `{deleted: count}` (bulk) |
 
 ### 3.3 Chat
-| Method & Path | Query Params | Response |
+| Method & Path | Query Params / Body | Response |
 |---|---|---|
-| `POST /ask` | `question`, `document_ids[]?`, `source` (`auto`\|`local`\|`integration`), `integration_id?` | `text/event-stream` — SSE events: `{type:"sources", sources}`, `{type:"token", content}`, `{type:"done", sources}`, `{type:"error", message}` |
-| `GET /chat/history` | — | `ChatMessageOut[]` |
-| `DELETE /chat/history` | — | `{cleared: true}` |
+| `POST /ask` | `question`, `session_id` (required), `document_ids[]?`, `source` (`auto`\|`local`\|`integration`), `integration_id?` | `text/event-stream` — SSE events: `{type:"sources", sources}`, `{type:"token", content}`, `{type:"done", sources}`, `{type:"error", message}` |
+| `GET /chat/sessions` | — | `ChatSessionOut[]`, newest-updated first |
+| `POST /chat/sessions` | — | `ChatSessionOut` — creates a new session titled "New Chat" |
+| `PATCH /chat/sessions/{id}` | `{title}` | `ChatSessionOut` — rename |
+| `DELETE /chat/sessions/{id}` | — | `{deleted: id}` — also removes its messages |
+| `GET /chat/sessions/{id}/messages` | — | `ChatMessageOut[]` for that session |
 
-### 3.4 Settings
+> `/ask` now requires an existing `session_id`; the frontend creates one via `POST /chat/sessions` before the first question if none is open. This replaced the older flat `/chat/history` endpoint.
+
+### 3.4 Reports
+| Method & Path | Body | Response |
+|---|---|---|
+| `POST /report/session` | `{session_id}` | `ReportOut` (`{report, sources}`) — generated from that session's Q&A history; upserted into `generated_reports` |
+| `POST /report/dataset` | `{topic, document_ids?}` | `ReportOut` — generated from a fresh similarity search over the dataset/scoped documents; upserted into `generated_reports` |
+| `GET /reports` | — | `GeneratedReportOut[]` — every cached report (session-based and dataset-based) for the user |
+| `POST /report/export` | `{report, sources, title}`, query `format` (`docx`\|`pdf`) | File stream — renders the given report text to the requested format |
+
+### 3.5 Settings
 | Method & Path | Body | Response |
 |---|---|---|
 | `GET /settings` | — | `SettingsOut` |
 | `PUT /settings` | `SettingsIn` | `SettingsOut` |
 
-### 3.5 Integrations
+### 3.6 Integrations
 | Method & Path | Body | Response |
 |---|---|---|
 | `GET /integrations` | — | `IntegrationOut[]` |
 | `POST /integrations` | `{provider_name, api_key?, base_url?, model?}` | `IntegrationOut` |
 | `DELETE /integrations/{id}` | — | `{deleted: id}` |
 
-### 3.6 Billing
+### 3.7 Data Sources
 | Method & Path | Body | Response |
 |---|---|---|
-| `GET /billing/plan` | — | `PlanOut` (plan, max_documents, max_storage_bytes, document_count, storage_bytes, max_ai_credits, ai_credits_remaining) |
+| `GET /data-sources` | — | `DataSourceConnectionOut[]` |
+| `POST /data-sources` | `{source_name, credential?}` | `DataSourceConnectionOut` — 402 if plan's `max_apps` limit reached |
+| `DELETE /data-sources/{id}` | — | `{deleted: id}` |
+
+### 3.8 Chat Channels
+| Method & Path | Body | Response |
+|---|---|---|
+| `GET /chat-channels` | — | `ChatChannelOut[]` |
+| `POST /chat-channels` | `{channel_name, bot_token?}` | `ChatChannelOut` — 402 if plan's `max_chat_channels` limit reached |
+| `DELETE /chat-channels/{id}` | — | `{deleted: id}` |
+
+### 3.9 Billing
+| Method & Path | Body | Response |
+|---|---|---|
+| `GET /billing/plan` | — | `PlanOut` (plan, max_documents, max_storage_bytes, document_count, storage_bytes, max_apps, max_chat_channels, max_ai_credits, ai_credits_remaining) |
 | `POST /billing/subscribe` | `{plan, card_number?, card_expiry?, card_cvc?}` | `PlanOut` |
 
-### 3.7 Data Management
+### 3.10 Data Management
 | Method & Path | Body | Response |
 |---|---|---|
 | `GET /data/export` | — | `.zip` stream (documents + manifest.json) |
@@ -158,7 +238,7 @@ Base URL: configurable (default `http://127.0.0.1:8000`). All endpoints except `
 | `POST /data/restore` | multipart JSON file | `{restored_chat_messages, restored_integrations}` |
 | `DELETE /account` | — | `{deleted: true}` |
 
-### 3.8 Stats
+### 3.11 Stats
 | Method & Path | Response |
 |---|---|
 | `GET /stats` | `{total_documents, total_chunks, questions_today, storage_bytes}` |
@@ -204,13 +284,17 @@ On upload, `hashlib.sha256(contents).hexdigest()` is computed before the file is
 
 ### 6.1 Adding a New AI Provider
 1. Backend: add an entry to `PROVIDER_CONFIG` in `app/query.py` (`base_url`, `style` — one of `openai`, `anthropic`, `cohere`, `gemini` request/response shapes — and any `extra_headers`).
-2. Frontend: add an entry to the `PROVIDERS` array in `app/settings/page.tsx` (`value`, `local`, `modelPlaceholder`, `models`, optional `apiKeyUrl`).
+2. Frontend: add an entry to the `PROVIDERS` array in `app/settings/model-provider/page.tsx` (`value`, `local`, `modelPlaceholder`, `models`, optional `apiKeyUrl`).
 3. No database migration is required — `integrations.provider_name` is a free-text column.
 
 ### 6.2 Changing Plan Limits
-Edit `PLAN_LIMITS`, `INTEGRATION_LIMITS`, and/or `COMMUNITY_MONTHLY_AI_CREDITS` in `app/main.py` and redeploy. No migration required.
+Edit `PLAN_LIMITS` (documents, storage, `max_apps`, `max_chat_channels`), `INTEGRATION_LIMITS`, and/or `COMMUNITY_MONTHLY_AI_CREDITS` in `app/main.py` and redeploy. No migration required.
 
-### 6.3 Adding a Settings Field
+### 6.3 Adding a New Data Source or Chat Channel
+1. Backend: `DataSourceConnection`/`ChatChannel` rows are free-text (`source_name`/`channel_name`), so a new provider needs no schema change to add to the list — only to wire up real functionality (e.g. an actual GitHub indexing job) instead of just persisting the connection.
+2. Frontend: add an entry to `AVAILABLE_SOURCES` (`app/settings/data-sources/page.tsx`) or `AVAILABLE_CHANNELS` (`app/settings/chat-channels/page.tsx`), with `available: true` once the backend integration exists.
+
+### 6.4 Adding a Settings Field
 1. Add the column to the relevant model in `models.py`.
 2. Write a new `migration_0NN_description.sql` and apply it to the live database (existing tables are never auto-altered).
 3. Add the field to `SettingsIn`/`SettingsOut` in `schemas.py`.
