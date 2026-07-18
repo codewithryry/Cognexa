@@ -5,7 +5,7 @@ import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Cognexa",
-  description: "AI-powered Knowledge Base",
+  description: "AI-powered Dataset",
 };
 
 export default function RootLayout({

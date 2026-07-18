@@ -493,6 +493,89 @@ def generate_answer_stream(
         }
 
 
+REPORT_SYSTEM_PROMPT = (
+    "You are a report-writing assistant. You will be given a transcript of a "
+    "Q&A conversation where each answer was grounded in the user's own documents, "
+    "labeled by source. Turn the transcript into a well-structured report with these "
+    "sections: Summary, Key Findings (as bullet points). Only use information present "
+    "in the transcript — do not invent anything. Do NOT include a Sources or "
+    "References section — the source list is displayed separately by the app, so "
+    "adding your own would duplicate it. Respond in plain text only — do not use "
+    "markdown formatting such as asterisks, underscores, backticks, or hash headers."
+)
+
+
+def build_report_prompt(qa_pairs):
+    transcript_blocks = []
+    for pair in qa_pairs:
+        sources = ", ".join(pair.get("sources") or []) or "none"
+        transcript_blocks.append(
+            f"Q: {pair['question']}\nA: {pair['answer']}\nSources: {sources}"
+        )
+    transcript = "\n\n".join(transcript_blocks)
+
+    return f"""
+Conversation Transcript:
+
+{transcript}
+
+
+Report:
+"""
+
+
+def generate_report(
+    qa_pairs,
+    ollama_url="http://localhost:11434",
+    llm_model="llama3.2",
+    external_provider=None,
+    external_api_key=None,
+    external_base_url=None,
+    external_model=None,
+):
+    if not qa_pairs:
+        return {"report": "There's no conversation yet to summarize into a report.", "sources": []}
+
+    all_sources = sorted({s for pair in qa_pairs for s in (pair.get("sources") or [])})
+    user_prompt = build_report_prompt(qa_pairs)
+
+    if external_provider:
+        report_text = "".join(
+            delta
+            for delta in stream_external_provider(
+                external_provider,
+                external_api_key,
+                external_base_url,
+                external_model,
+                REPORT_SYSTEM_PROMPT,
+                user_prompt,
+            )
+            if delta
+        )
+        return {"report": report_text, "sources": all_sources}
+
+    ollama_client = ollama.Client(host=ollama_url)
+
+    try:
+        response = ollama_client.chat(
+            model=llm_model,
+            messages=[
+                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return {"report": response["message"]["content"], "sources": all_sources}
+    except httpx.ConnectError:
+        return {
+            "report": (
+                "Local AI (Ollama) isn't running, so the report couldn't be generated. "
+                "Start Ollama on this machine, or add a provider under Settings > Integrations "
+                "and select it from the provider menu."
+            ),
+            "sources": all_sources,
+        }
+
+
 if __name__ == "__main__":
 
     print("=" * 50)

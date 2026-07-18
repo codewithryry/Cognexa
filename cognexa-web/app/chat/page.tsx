@@ -1,9 +1,20 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { askAIStream, clearChatHistory, getChatHistory, getIntegrations, IntegrationPayload } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  askAIStream,
+  createChatSession,
+  deleteChatSession,
+  generateSessionReport,
+  getChatSessionMessages,
+  getChatSessions,
+  getIntegrations,
+  IntegrationPayload,
+  ReportPayload,
+} from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
+import useModelSetupWarning from "@/lib/useModelSetupWarning";
 import DocumentFilter from "@/components/DocumentFilter";
 
 interface ChatMessage {
@@ -40,6 +51,7 @@ export default function ChatPage() {
 }
 
 function ChatPageInner() {
+  const [sessionId, setSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -47,16 +59,24 @@ function ChatPageInner() {
   const [scopedDocIds, setScopedDocIds] = useState<number[]>([]);
   const [source, setSource] = useState<"auto" | "local" | "integration">("auto");
   const [integrations, setIntegrations] = useState<IntegrationPayload[]>([]);
+  const [integrationsLoaded, setIntegrationsLoaded] = useState(false);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState<number | null>(null);
 
   const selectedIntegration =
     integrations.find((i) => i.id === selectedIntegrationId) ?? null;
   const defaultIntegration = integrations[0] ?? null;
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [report, setReport] = useState<ReportPayload | null>(null);
+  const [startingNewChat, setStartingNewChat] = useState(false);
+  const [deletingChat, setDeletingChat] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const providerMenuRef = useRef<HTMLDivElement>(null);
   const { confirm, notify } = useDialog();
+  useModelSetupWarning();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const autoSentRef = useRef(false);
 
   useEffect(() => {
     const docParam = searchParams.get("doc");
@@ -78,17 +98,48 @@ function ChatPageInner() {
   }, []);
 
   useEffect(() => {
-    getChatHistory()
-      .then((history) => setMessages(history))
-      .catch((err) =>
-        notify(err instanceof Error ? err.message : "Failed to load chat history.", "error")
-      )
-      .finally(() => setLoading(false));
+    let cancelled = false;
 
+    async function init() {
+      try {
+        const sessions = await getChatSessions();
+        const requestedId = Number(searchParams.get("session"));
+        const target = sessions.find((s) => s.id === requestedId) ?? sessions[0];
+        if (cancelled) return;
+
+        // No session yet — leave sessionId null instead of eagerly creating one here.
+        // Creating it lazily on the first message avoids racing duplicate "New Chat"
+        // rows when this effect fires more than once (e.g. React StrictMode + a slow DB).
+        if (!target) {
+          setMessages([]);
+          return;
+        }
+
+        setSessionId(target.id);
+        const history = await getChatSessionMessages(target.id);
+        if (cancelled) return;
+        setMessages(history);
+      } catch (err) {
+        if (!cancelled) {
+          notify(err instanceof Error ? err.message : "Failed to load chat history.", "error");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    init();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     getIntegrations()
       .then(setIntegrations)
-      .catch(() => setIntegrations([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => setIntegrations([]))
+      .finally(() => setIntegrationsLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -107,6 +158,19 @@ function ChatPageInner() {
       return;
     }
 
+    let activeSessionId = sessionId;
+    if (!activeSessionId) {
+      try {
+        const session = await createChatSession();
+        activeSessionId = session.id;
+        setSessionId(session.id);
+        router.replace(`/chat?session=${session.id}`);
+      } catch (err) {
+        notify(err instanceof Error ? err.message : "Failed to start a new chat.", "error");
+        return;
+      }
+    }
+
     setInput("");
     setAsking(true);
 
@@ -123,6 +187,7 @@ function ChatPageInner() {
     try {
       await askAIStream(
         q,
+        activeSessionId,
         scopedDocIds.length ? scopedDocIds : undefined,
         {
           onSources: (sources) => {
@@ -156,23 +221,84 @@ function ChatPageInner() {
     }
   }
 
-  async function handleClear() {
+  useEffect(() => {
+    if (loading || !integrationsLoaded || autoSentRef.current) return;
+
+    const q = searchParams.get("q");
+    if (!q) return;
+
+    autoSentRef.current = true;
+    router.replace(sessionId ? `/chat?session=${sessionId}` : "/chat");
+    handleSend(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, integrationsLoaded]);
+
+  async function handleNewChat() {
+    if (startingNewChat) return;
+
+    setStartingNewChat(true);
+    try {
+      const session = await createChatSession();
+      setSessionId(session.id);
+      setMessages([]);
+      router.replace(`/chat?session=${session.id}`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to start a new chat.", "error");
+    } finally {
+      setStartingNewChat(false);
+    }
+  }
+
+  async function handleDeleteChat() {
+    if (!sessionId) return;
+
     const confirmed = await confirm({
-      title: "Clear conversation",
-      message: "This will permanently delete your entire chat history.",
-      confirmLabel: "Clear",
+      title: "Delete this chat",
+      message: "This will permanently delete this conversation. This cannot be undone.",
+      confirmLabel: "Delete",
       danger: true,
     });
 
     if (!confirmed) return;
 
+    setDeletingChat(true);
     try {
-      await clearChatHistory();
+      await deleteChatSession(sessionId);
+      const session = await createChatSession();
+      setSessionId(session.id);
       setMessages([]);
-      notify("Conversation cleared.", "success");
+      router.replace(`/chat?session=${session.id}`);
+      notify("Chat deleted.", "success");
     } catch (err) {
-      notify(err instanceof Error ? err.message : "Failed to clear conversation.", "error");
+      notify(err instanceof Error ? err.message : "Failed to delete this chat.", "error");
+    } finally {
+      setDeletingChat(false);
     }
+  }
+
+  async function handleGenerateReport() {
+    if (messages.length === 0 || generatingReport || !sessionId) return;
+
+    setGeneratingReport(true);
+    try {
+      const result = await generateSessionReport(sessionId, source, selectedIntegration?.id);
+      setReport(result);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to generate report.", "error");
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
+  function handleDownloadReport() {
+    if (!report) return;
+    const blob = new Blob([report.report], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cognexa-report-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -181,7 +307,7 @@ function ChatPageInner() {
         <div className="space-y-4">
           <div className="flex items-start gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xs font-semibold text-white">
-              AI
+              CX
             </div>
             <div className="max-w-lg rounded-2xl rounded-tl-sm bg-gray-100 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
               Hello! Ask me anything about your uploaded documents.
@@ -208,7 +334,7 @@ function ChatPageInner() {
               {(msg.answer || msg.streaming) && (
                 <div className="flex items-start gap-3">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xs font-semibold text-white">
-                    AI
+                    CX
                   </div>
                   <div className="max-w-lg space-y-2">
                     <div className="whitespace-pre-wrap rounded-2xl rounded-tl-sm bg-gray-100 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
@@ -261,7 +387,7 @@ function ChatPageInner() {
 
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
-            <DocumentFilter selected={scopedDocIds} onChange={setScopedDocIds} />
+            <DocumentFilter selected={scopedDocIds} onChange={setScopedDocIds} openUpward compact />
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -344,9 +470,59 @@ function ChatPageInner() {
             </div>
 
             <button
-              onClick={handleClear}
-              disabled={messages.length === 0}
-              title="Clear conversation"
+              onClick={handleNewChat}
+              disabled={startingNewChat}
+              title="New Chat"
+              className="flex items-center justify-center rounded-full p-2 text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
+
+            <button
+              onClick={handleGenerateReport}
+              disabled={messages.length === 0 || generatingReport}
+              title="Generate report from this conversation"
+              className="flex items-center justify-center rounded-full p-2 text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {generatingReport ? (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.75}
+                  stroke="currentColor"
+                  className="h-4 w-4 animate-spin"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.75}
+                  stroke="currentColor"
+                  className="h-4 w-4"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+                  />
+                </svg>
+              )}
+            </button>
+
+            <button
+              onClick={handleDeleteChat}
+              disabled={!sessionId || deletingChat}
+              title="Delete this chat"
               className="flex items-center justify-center rounded-full p-2 text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <svg
@@ -385,6 +561,65 @@ function ChatPageInner() {
           </div>
         </div>
       </div>
+
+      {report && (
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-6"
+          onClick={() => setReport(null)}
+        >
+          <div
+            className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white dark:bg-gray-900 p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Conversation Report
+              </h2>
+
+              <button
+                onClick={() => setReport(null)}
+                className="rounded-full p-1.5 text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="whitespace-pre-wrap rounded-xl bg-gray-50 dark:bg-gray-800 p-4 text-sm text-gray-700 dark:text-gray-300">
+              {stripMarkdown(report.report)}
+            </div>
+
+            {report.sources.length > 0 && (
+              <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                Sources: {report.sources.join(", ")}
+              </p>
+            )}
+
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={handleDownloadReport}
+                className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 py-2 text-sm font-medium text-white transition hover:shadow-md"
+              >
+                Download as .txt
+              </button>
+              <button
+                onClick={() => setReport(null)}
+                className="rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 transition hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

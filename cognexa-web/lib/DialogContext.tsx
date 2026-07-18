@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -18,14 +19,23 @@ interface ConfirmOptions {
   danger?: boolean;
 }
 
+interface WarnOptions {
+  title?: string;
+  message: React.ReactNode;
+  confirmLabel?: string;
+  confirmHref?: string;
+}
+
 interface DialogContextValue {
   confirm: (options: ConfirmOptions | string) => Promise<boolean>;
   notify: (message: string, kind?: ToastKind) => void;
+  warn: (options: WarnOptions) => Promise<void>;
 }
 
 const DialogContext = createContext<DialogContextValue>({
   confirm: async () => false,
   notify: () => {},
+  warn: async () => {},
 });
 
 export function useDialog() {
@@ -35,9 +45,12 @@ export function useDialog() {
 let toastId = 0;
 
 export default function DialogProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
+  const [warnState, setWarnState] = useState<WarnOptions | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const resolverRef = useRef<((value: boolean) => void) | null>(null);
+  const warnResolverRef = useRef<(() => void) | null>(null);
 
   const confirm = useCallback((options: ConfirmOptions | string) => {
     const normalized: ConfirmOptions =
@@ -47,6 +60,14 @@ export default function DialogProvider({ children }: { children: React.ReactNode
 
     return new Promise<boolean>((resolve) => {
       resolverRef.current = resolve;
+    });
+  }, []);
+
+  const warn = useCallback((options: WarnOptions) => {
+    setWarnState(options);
+
+    return new Promise<void>((resolve) => {
+      warnResolverRef.current = resolve;
     });
   }, []);
 
@@ -64,9 +85,53 @@ export default function DialogProvider({ children }: { children: React.ReactNode
     setConfirmState(null);
   }
 
+  function handleWarnClose() {
+    const href = warnState?.confirmHref;
+    warnResolverRef.current?.();
+    warnResolverRef.current = null;
+    setWarnState(null);
+    if (href) router.push(href);
+  }
+
   return (
-    <DialogContext.Provider value={{ confirm, notify }}>
+    <DialogContext.Provider value={{ confirm, notify, warn }}>
       {children}
+
+      {warnState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-gray-800 bg-gray-950 p-6 shadow-2xl animate-fade-in">
+            <div className="flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.75}
+                stroke="currentColor"
+                className="h-5 w-5 shrink-0 text-amber-400"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                />
+              </svg>
+              <h3 className="text-base font-semibold text-white">
+                {warnState.title ?? "Warn"}
+              </h3>
+            </div>
+            <p className="mt-3 text-sm text-gray-300">{warnState.message}</p>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={handleWarnClose}
+                className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-900 transition hover:bg-gray-100"
+              >
+                {warnState.confirmLabel ?? "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmState && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">

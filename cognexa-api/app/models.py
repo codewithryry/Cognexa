@@ -67,12 +67,61 @@ class Integration(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 
+class DataSourceConnection(Base):
+    __tablename__ = "data_source_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    source_name = Column(String(100), nullable=False)
+    credential = Column(String(255), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class ChatChannel(Base):
+    __tablename__ = "chat_channels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    channel_name = Column(String(100), nullable=False)
+    bot_token = Column(String(255), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(255), default="New Chat")
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
     question = Column(Text)
     answer = Column(Text)
     sources = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class GeneratedReport(Base):
+    """A saved report. session_id set = generated from a chat session (one row per
+    session, upserted on regenerate). session_id null = the user's most recent
+    dataset-topic report (one row per user, upserted on regenerate)."""
+
+    __tablename__ = "generated_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
+    topic = Column(String(255), nullable=True)
+    title = Column(String(255), nullable=False, default="Report")
+    report = Column(Text, nullable=False)
+    sources = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

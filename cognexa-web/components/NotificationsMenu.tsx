@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getChatHistory, getDocuments } from "@/lib/api";
+import { getChatSessions, getDocuments } from "@/lib/api";
 
 interface Notification {
   id: string;
   title: string;
   description: string;
-  time: string;
+  time: string | null;
 }
 
 export default function NotificationsMenu() {
@@ -27,8 +27,8 @@ export default function NotificationsMenu() {
   }, []);
 
   function loadNotifications() {
-    Promise.all([getDocuments(), getChatHistory()])
-      .then(([docs, chats]) => {
+    Promise.all([getDocuments(), getChatSessions()])
+      .then(([docs, sessions]) => {
         const docNotifs: Notification[] = docs.slice(0, 3).map((doc: any) => ({
           id: `doc-${doc.id}`,
           title: "Document indexed",
@@ -36,11 +36,11 @@ export default function NotificationsMenu() {
           time: doc.created_at,
         }));
 
-        const chatNotifs: Notification[] = chats.slice(-2).map((chat: any) => ({
-          id: `chat-${chat.id}`,
+        const chatNotifs: Notification[] = sessions.slice(0, 2).map((session) => ({
+          id: `chat-${session.id}`,
           title: "AI answered a question",
-          description: chat.question,
-          time: chat.created_at,
+          description: session.title,
+          time: session.updated_at,
         }));
 
         const merged = [...docNotifs, ...chatNotifs].sort((a, b) =>

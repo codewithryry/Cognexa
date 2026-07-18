@@ -85,6 +85,36 @@ class IntegrationOut(BaseModel):
         from_attributes = True
 
 
+class DataSourceConnectionIn(BaseModel):
+    source_name: str
+    credential: str | None = None
+
+
+class DataSourceConnectionOut(BaseModel):
+    id: int
+    source_name: str
+    connected: bool
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChatChannelIn(BaseModel):
+    channel_name: str
+    bot_token: str | None = None
+
+
+class ChatChannelOut(BaseModel):
+    id: int
+    channel_name: str
+    connected: bool
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
 class DbStatusOut(BaseModel):
     connected: bool
     message: str
@@ -98,6 +128,12 @@ class PlanOut(BaseModel):
     storage_bytes: int
     max_ai_credits: int | None = None
     ai_credits_remaining: int | None = None
+    max_apps: int | None = None
+    apps_connected: int = 0
+    max_chat_channels: int | None = None
+    chat_channels_connected: int = 0
+    billing_cycle_start: datetime | None = None
+    billing_cycle_end: datetime | None = None
 
 
 class SubscribeIn(BaseModel):
@@ -113,6 +149,54 @@ class ChatMessageOut(BaseModel):
     answer: str
     sources: list[str] = []
     created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def split_sources(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [s for s in value.split(",") if s]
+        return value
+
+
+class ChatSessionOut(BaseModel):
+    id: int
+    title: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChatSessionRenameIn(BaseModel):
+    title: str
+
+
+class ReportOut(BaseModel):
+    report: str
+    sources: list[str] = []
+
+
+class ReportExportIn(BaseModel):
+    report: str
+    sources: list[str] = []
+    title: str = "Report"
+
+
+class GeneratedReportOut(BaseModel):
+    id: int
+    session_id: int | None = None
+    topic: str | None = None
+    title: str
+    report: str
+    sources: list[str] = []
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True

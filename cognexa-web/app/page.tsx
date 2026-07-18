@@ -27,7 +27,7 @@ const FEATURES = [
     emoji: "🔒",
   },
   {
-    title: "Chatbot Integration",
+    title: "Model Provider",
     description:
       "Connect Cline — or any other API-key based chatbot/assistant — from Settings so it can pull project context before prompting.",
     emoji: "🔌",
@@ -126,7 +126,7 @@ const STATS = [
 
 const PLANS = [
   {
-    name: "Community",
+    name: "Free",
     price: "Free",
     period: "self-hosted",
     description: "For individuals running Cognexa locally on their own machine.",
@@ -135,6 +135,7 @@ const PLANS = [
       "15 MB storage",
       "Unlimited questions (local models only)",
       "50 AI questions/month (OpenRouter)",
+      "Up to 2 connected apps",
       "PDF, DOCX & image uploads",
       "Access to free AI models via OpenRouter",
       "Standard indexing & retrieval speed",
@@ -152,6 +153,7 @@ const PLANS = [
       "10 GB storage",
       "Unlimited AI questions (using your own API usage)",
       "Connect up to 3 AI providers (OpenAI, Anthropic, Cohere, Gemini, Groq, OpenRouter & more)",
+      "Up to 10 connected apps",
       "Priority indexing & faster retrieval",
       "Email support",
     ],
@@ -168,6 +170,7 @@ const PLANS = [
       "Unlimited storage (Fair Use Policy)",
       "Unlimited AI questions (using your own API usage)",
       "Unlimited AI provider connections",
+      "Unlimited connected apps",
       "Priority indexing & faster retrieval",
       "Priority support",
     ],
@@ -182,7 +185,7 @@ export default function Home() {
   const [checkoutPlan, setCheckoutPlan] = useState<"pro" | "team" | null>(null);
 
   function handlePlanClick(planName: string) {
-    if (planName === "Community") {
+    if (planName === "Free") {
       router.push(user ? "/dashboard" : "/login");
       return;
     }
@@ -222,7 +225,7 @@ export default function Home() {
                 href="/dashboard"
                 className="rounded-lg bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-indigo-500/20 transition hover:shadow-lg"
               >
-                Go to Dashboard
+                Go to Home
               </Link>
             ) : (
               <Link
@@ -241,11 +244,11 @@ export default function Home() {
           <h1 className="bg-gradient-to-r from-gray-900 via-indigo-600 to-fuchsia-600 bg-clip-text text-5xl font-bold leading-tight text-transparent sm:text-6xl sm:leading-tight dark:from-white dark:via-indigo-200 dark:to-fuchsia-200">
             Your documents.
             <br />
-            Your AI knowledge base.
+            Your AI dataset.
           </h1>
 
           <p className="mx-auto mt-5 max-w-2xl text-lg text-gray-600 dark:text-slate-400">
-            Upload documents, build a searchable knowledge base, and ask
+            Upload documents, build a searchable dataset, and ask
             questions in plain language — answered through
             Retrieval-Augmented Generation, running entirely on your own
             machine.
@@ -257,7 +260,7 @@ export default function Home() {
                 href="/dashboard"
                 className="rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:-translate-y-0.5 hover:shadow-xl"
               >
-                Go to Dashboard →
+                Go to Home →
               </Link>
             ) : (
               <>
@@ -517,7 +520,7 @@ export default function Home() {
       <div className="mx-auto max-w-6xl px-6 py-16">
         <div className="rounded-3xl border border-gray-200 bg-gradient-to-br from-indigo-50 via-white to-fuchsia-50 p-10 text-center shadow-sm dark:border-white/10 dark:from-indigo-500/10 dark:via-white/[0.02] dark:to-fuchsia-500/10 dark:shadow-xl">
           <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-white">
-            Ready to build your knowledge base?
+            Ready to build your dataset?
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-gray-600 dark:text-slate-400">
             Sign in and start uploading documents — your first indexed answer
@@ -529,7 +532,7 @@ export default function Home() {
               href={user ? "/dashboard" : "/login"}
               className="inline-block rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:-translate-y-0.5 hover:shadow-xl"
             >
-              {user ? "Go to Dashboard →" : "Get Started →"}
+              {user ? "Go to Home →" : "Get Started →"}
             </Link>
           </div>
         </div>

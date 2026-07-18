@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getBillingPlan, getDocuments, PlanPayload, uploadDocument } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
+import useModelSetupWarning from "@/lib/useModelSetupWarning";
 import DemoCheckoutModal from "@/components/DemoCheckoutModal";
 
 interface UploadResult {
@@ -31,6 +32,7 @@ export default function UploadPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { notify } = useDialog();
+  useModelSetupWarning();
 
   function loadRecentUploads() {
     getDocuments()
@@ -132,7 +134,7 @@ export default function UploadPage() {
       {limitReached && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-4">
           <p className="text-sm text-amber-800 dark:text-amber-300">
-            You&apos;ve reached your Community plan limit. Manage your plan in Settings to
+            You&apos;ve reached your Free plan limit. Manage your plan in Settings to
             upload more.
           </p>
           <button

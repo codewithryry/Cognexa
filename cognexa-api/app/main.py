@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 import os
 from pypdf import PdfReader
 from docx import Document as DocxDocument
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -21,17 +21,36 @@ from app.auth import (
     verify_password,
 )
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import ChatMessage, Document, Integration, Settings, User
+from app.models import (
+    ChatChannel,
+    ChatMessage,
+    ChatSession,
+    DataSourceConnection,
+    Document,
+    GeneratedReport,
+    Integration,
+    Settings,
+    User,
+)
 from app.rag import delete_document_chunks, process_document
-from app.query import generate_answer_stream
+from app.query import generate_answer_stream, generate_report
 from app.scheduler import PriorityWorkerPool, PrioritySlotGate, plan_priority
 from app.schemas import (
+    ChatChannelIn,
+    ChatChannelOut,
     ChatMessageOut,
+    ChatSessionOut,
+    ChatSessionRenameIn,
+    DataSourceConnectionIn,
+    DataSourceConnectionOut,
     DbStatusOut,
     DocumentOut,
+    GeneratedReportOut,
     IntegrationIn,
     IntegrationOut,
     PlanOut,
+    ReportExportIn,
+    ReportOut,
     SettingsIn,
     SettingsOut,
     StatsOut,
@@ -93,6 +112,65 @@ def extract_document_text(file_path, filename):
 
 Base.metadata.create_all(bind=engine)
 
+
+def ensure_chat_message_session_column():
+    """create_all only creates missing tables, not new columns on tables that
+    already existed -- chat_messages predates the session_id column, so add it
+    by hand if it isn't there yet. Idempotent: checked via information_schema
+    every startup, but only ALTERs once."""
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("chat_messages")}
+    if "session_id" in columns:
+        return
+
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE chat_messages ADD COLUMN session_id INTEGER NULL"))
+        conn.execute(
+            text("ALTER TABLE chat_messages ADD INDEX ix_chat_messages_session_id (session_id)")
+        )
+        conn.commit()
+
+
+ensure_chat_message_session_column()
+
+
+def migrate_orphan_chat_messages():
+    """One-time backfill for chat_messages saved before sessions existed.
+    Idempotent: once a message has a session_id, it's never picked up again."""
+    db = SessionLocal()
+    try:
+        user_ids = [
+            row[0]
+            for row in db.query(ChatMessage.user_id)
+            .filter(ChatMessage.session_id.is_(None))
+            .distinct()
+            .all()
+        ]
+        for user_id in user_ids:
+            orphans = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.user_id == user_id, ChatMessage.session_id.is_(None))
+                .order_by(ChatMessage.created_at.asc())
+                .all()
+            )
+            if not orphans:
+                continue
+
+            title = (orphans[0].question or "Previous conversation")[:60]
+            session = ChatSession(user_id=user_id, title=title)
+            db.add(session)
+            db.flush()
+
+            for message in orphans:
+                message.session_id = session.id
+
+            db.commit()
+    finally:
+        db.close()
+
+
+migrate_orphan_chat_messages()
+
 app = FastAPI(
     title="Cognexa API",
     version="1.0.0"
@@ -138,13 +216,32 @@ def index_document_job(document_id, text, filename, user_id, chunk_size, chunk_o
         db.close()
 
 PLAN_LIMITS = {
-    "community": {"max_documents": 25, "max_storage_bytes": 15 * 1024 * 1024},
-    "pro": {"max_documents": 100, "max_storage_bytes": 10 * 1024 * 1024 * 1024},
-    "team": {"max_documents": None, "max_storage_bytes": None},
+    "community": {
+        "max_documents": 25,
+        "max_storage_bytes": 15 * 1024 * 1024,
+        "max_apps": 2,
+        "max_chat_channels": 1,
+    },
+    "pro": {
+        "max_documents": 100,
+        "max_storage_bytes": 10 * 1024 * 1024 * 1024,
+        "max_apps": 10,
+        "max_chat_channels": 5,
+    },
+    "team": {
+        "max_documents": None,
+        "max_storage_bytes": None,
+        "max_apps": None,
+        "max_chat_channels": None,
+    },
 }
 
+BILLING_CYCLE_LENGTH = timedelta(days=365)
+
+# "community" stays the internal plan key (stored on users, compared in code)
+# — only this display name changed, to "Free" per product naming.
 PLAN_DISPLAY_NAMES = {
-    "community": "Community",
+    "community": "Free",
     "pro": "Pro",
     "team": "Unlimited",
 }
@@ -303,6 +400,7 @@ def get_billing_plan(
     plan = current_user.plan or "community"
     limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["community"])
     document_count, storage_bytes = get_plan_usage(db, current_user.id)
+    cycle_start = current_user.created_at or datetime.utcnow()
 
     return {
         "plan": plan,
@@ -314,6 +412,16 @@ def get_billing_plan(
         "ai_credits_remaining": (
             get_remaining_community_credits(current_user, db) if plan == "community" else None
         ),
+        "max_apps": limits["max_apps"],
+        "apps_connected": db.query(DataSourceConnection).filter(
+            DataSourceConnection.user_id == current_user.id
+        ).count(),
+        "max_chat_channels": limits["max_chat_channels"],
+        "chat_channels_connected": db.query(ChatChannel).filter(
+            ChatChannel.user_id == current_user.id
+        ).count(),
+        "billing_cycle_start": cycle_start,
+        "billing_cycle_end": cycle_start + BILLING_CYCLE_LENGTH,
     }
 
 
@@ -335,6 +443,7 @@ def subscribe_plan(
     limits = PLAN_LIMITS[subscribe_in.plan]
     document_count, storage_bytes = get_plan_usage(db, current_user.id)
     plan = current_user.plan
+    cycle_start = current_user.created_at or datetime.utcnow()
 
     return {
         "plan": plan,
@@ -346,6 +455,16 @@ def subscribe_plan(
         "ai_credits_remaining": (
             get_remaining_community_credits(current_user, db) if plan == "community" else None
         ),
+        "max_apps": limits["max_apps"],
+        "apps_connected": db.query(DataSourceConnection).filter(
+            DataSourceConnection.user_id == current_user.id
+        ).count(),
+        "max_chat_channels": limits["max_chat_channels"],
+        "chat_channels_connected": db.query(ChatChannel).filter(
+            ChatChannel.user_id == current_user.id
+        ).count(),
+        "billing_cycle_start": cycle_start,
+        "billing_cycle_end": cycle_start + BILLING_CYCLE_LENGTH,
     }
 
 
@@ -464,6 +583,23 @@ def list_documents(
         .order_by(Document.created_at.desc())
         .all()
     )
+
+
+@app.get("/documents/{document_id}", response_model=DocumentOut)
+def get_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.user_id == current_user.id)
+        .first()
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    return document
 
 
 @app.get("/documents/{document_id}/download")
@@ -587,12 +723,21 @@ def is_document_listing_question(question: str) -> bool:
 @app.post("/ask")
 async def ask_question(
     question: str,
+    session_id: int = Query(...),
     document_ids: list[int] | None = Query(default=None),
     source: str = Query(default="local"),
     integration_id: int | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
     settings = get_or_create_settings(db, current_user.id)
 
     if document_ids:
@@ -675,6 +820,22 @@ async def ask_question(
         if get_remaining_community_credits(current_user, db) <= 0:
             selected_integration = None
 
+    def save_message(answer_text, sources_list):
+        message = ChatMessage(
+            user_id=current_user.id,
+            session_id=session.id,
+            question=question,
+            answer=answer_text,
+            sources=",".join(sources_list),
+        )
+        db.add(message)
+
+        if session.title == "New Chat" or not session.title:
+            session.title = question[:60]
+        session.updated_at = datetime.utcnow()
+
+        db.commit()
+
     def event_stream():
         full_answer = []
         sources = []
@@ -707,14 +868,7 @@ async def ask_question(
                 full_answer.append(answer_text)
                 yield f"data: {json.dumps({'type': 'token', 'content': answer_text})}\n\n"
 
-                message = ChatMessage(
-                    user_id=current_user.id,
-                    question=question,
-                    answer="".join(full_answer),
-                    sources=",".join(sources),
-                )
-                db.add(message)
-                db.commit()
+                save_message("".join(full_answer), sources)
 
                 yield f"data: {json.dumps({'type': 'done', 'sources': sources})}\n\n"
                 return
@@ -744,42 +898,394 @@ async def ask_question(
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             return
 
-        message = ChatMessage(
-            user_id=current_user.id,
-            question=question,
-            answer="".join(full_answer),
-            sources=",".join(sources),
-        )
-        db.add(message)
-        db.commit()
+        save_message("".join(full_answer), sources)
 
         yield f"data: {json.dumps({'type': 'done', 'sources': sources})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.get("/chat/history", response_model=list[ChatMessageOut])
-def chat_history(
+@app.get("/chat/sessions", response_model=list[ChatSessionOut])
+def list_chat_sessions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == current_user.id)
+        .order_by(ChatSession.updated_at.desc())
+        .all()
+    )
+
+
+@app.post("/chat/sessions", response_model=ChatSessionOut)
+def create_chat_session(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = ChatSession(user_id=current_user.id, title="New Chat")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    return session
+
+
+@app.patch("/chat/sessions/{session_id}", response_model=ChatSessionOut)
+def rename_chat_session(
+    session_id: int,
+    rename_in: ChatSessionRenameIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
+    session.title = rename_in.title.strip()[:60] or "New Chat"
+    db.commit()
+    db.refresh(session)
+
+    return session
+
+
+@app.delete("/chat/sessions/{session_id}")
+def delete_chat_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
+    db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+    db.delete(session)
+    db.commit()
+
+    return {"deleted": session_id}
+
+
+@app.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageOut])
+def get_chat_session_messages(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
+    return (
         db.query(ChatMessage)
-        .filter(ChatMessage.user_id == current_user.id)
+        .filter(ChatMessage.session_id == session_id)
         .order_by(ChatMessage.created_at.asc())
         .all()
     )
 
 
-@app.delete("/chat/history")
-def clear_chat_history(
+def resolve_report_integration(db, current_user, plan, source, integration_id):
+    def resolve_integration(integration):
+        if not integration or not integration.api_key:
+            return None
+        if plan == "community" and not is_allowed_community_integration(
+            integration.provider_name, integration.model, integration.base_url
+        ):
+            return None
+        return integration
+
+    selected_integration = None
+    if source == "integration" and integration_id is not None:
+        requested_integration = (
+            db.query(Integration)
+            .filter(Integration.id == integration_id, Integration.user_id == current_user.id)
+            .first()
+        )
+        if not requested_integration:
+            raise HTTPException(status_code=404, detail="Integration not found.")
+        selected_integration = resolve_integration(requested_integration)
+    elif source == "auto":
+        auto_integration = (
+            db.query(Integration)
+            .filter(Integration.user_id == current_user.id)
+            .order_by(Integration.created_at.desc())
+            .first()
+        )
+        selected_integration = resolve_integration(auto_integration)
+
+    if selected_integration and plan == "community":
+        if get_remaining_community_credits(current_user, db) <= 0:
+            selected_integration = None
+
+    return selected_integration
+
+
+@app.post("/report/session", response_model=ReportOut)
+def report_session(
+    session_id: int = Query(...),
+    source: str = Query(default="auto"),
+    integration_id: int | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
-    db.commit()
+    chat_session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+        .first()
+    )
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
 
-    return {"cleared": True}
+    settings = get_or_create_settings(db, current_user.id)
+    plan = current_user.plan or "community"
+    selected_integration = resolve_report_integration(db, current_user, plan, source, integration_id)
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+    qa_pairs = [
+        {
+            "question": m.question,
+            "answer": m.answer,
+            "sources": [s for s in (m.sources or "").split(",") if s],
+        }
+        for m in messages
+    ]
+
+    if selected_integration and plan == "community":
+        consume_community_credit(current_user, db)
+
+    result = generate_report(
+        qa_pairs,
+        ollama_url=settings.ollama_url,
+        llm_model=settings.llm_model,
+        external_provider=selected_integration.provider_name if selected_integration else None,
+        external_api_key=selected_integration.api_key if selected_integration else None,
+        external_base_url=selected_integration.base_url if selected_integration else None,
+        external_model=selected_integration.model if selected_integration else None,
+    )
+
+    save_generated_report(
+        db,
+        current_user,
+        session_id=session_id,
+        title=chat_session.title,
+        report=result["report"],
+        sources=result["sources"],
+    )
+
+    return result
+
+
+@app.post("/report/dataset", response_model=ReportOut)
+def report_dataset(
+    topic: str = Query(...),
+    document_ids: list[int] | None = Query(default=None),
+    source: str = Query(default="auto"),
+    integration_id: int | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if document_ids:
+        owned_count = (
+            db.query(Document)
+            .filter(Document.id.in_(document_ids), Document.user_id == current_user.id)
+            .count()
+        )
+        if owned_count != len(document_ids):
+            raise HTTPException(status_code=404, detail="One or more documents not found")
+
+    settings = get_or_create_settings(db, current_user.id)
+    plan = current_user.plan or "community"
+    selected_integration = resolve_report_integration(db, current_user, plan, source, integration_id)
+
+    if selected_integration and plan == "community":
+        consume_community_credit(current_user, db)
+
+    full_answer = []
+    sources = []
+    with RETRIEVAL_GATE(plan_priority(plan)):
+        for event in generate_answer_stream(
+            topic,
+            user_id=current_user.id,
+            document_ids=document_ids,
+            ollama_url=settings.ollama_url,
+            llm_model=settings.llm_model,
+            external_provider=selected_integration.provider_name if selected_integration else None,
+            external_api_key=selected_integration.api_key if selected_integration else None,
+            external_base_url=selected_integration.base_url if selected_integration else None,
+            external_model=selected_integration.model if selected_integration else None,
+        ):
+            if event["type"] == "sources":
+                sources = event["sources"]
+            elif event["type"] == "token":
+                full_answer.append(event["content"])
+
+    qa_pairs = [{"question": topic, "answer": "".join(full_answer), "sources": sources}]
+
+    result = generate_report(
+        qa_pairs,
+        ollama_url=settings.ollama_url,
+        llm_model=settings.llm_model,
+        external_provider=selected_integration.provider_name if selected_integration else None,
+        external_api_key=selected_integration.api_key if selected_integration else None,
+        external_base_url=selected_integration.base_url if selected_integration else None,
+        external_model=selected_integration.model if selected_integration else None,
+    )
+
+    save_generated_report(
+        db,
+        current_user,
+        session_id=None,
+        topic=topic,
+        title=topic,
+        report=result["report"],
+        sources=result["sources"],
+    )
+
+    return result
+
+
+def save_generated_report(db, current_user, *, session_id, title, report, sources, topic=None):
+    """Upserts the saved report: one row per (user, session) for chat-based
+    reports, one row per user with session_id NULL for the latest dataset report."""
+    query = db.query(GeneratedReport).filter(GeneratedReport.user_id == current_user.id)
+    query = (
+        query.filter(GeneratedReport.session_id == session_id)
+        if session_id is not None
+        else query.filter(GeneratedReport.session_id.is_(None))
+    )
+    existing = query.first()
+
+    if existing:
+        existing.title = title
+        existing.report = report
+        existing.sources = ",".join(sources)
+        existing.topic = topic
+    else:
+        existing = GeneratedReport(
+            user_id=current_user.id,
+            session_id=session_id,
+            topic=topic,
+            title=title,
+            report=report,
+            sources=",".join(sources),
+        )
+        db.add(existing)
+
+    db.commit()
+    return existing
+
+
+@app.get("/reports", response_model=list[GeneratedReportOut])
+def list_generated_reports(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(GeneratedReport)
+        .filter(GeneratedReport.user_id == current_user.id)
+        .order_by(GeneratedReport.updated_at.desc())
+        .all()
+    )
+
+
+def parse_report_lines(report_text: str):
+    """Splits the model's report text into (is_bullet, text) lines, stripping
+    any leading markdown bullet marker the model added despite being told not to."""
+    lines = []
+    for raw_line in report_text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        is_bullet = line.startswith(("* ", "- ", "• "))
+        if is_bullet:
+            line = line[2:].strip()
+        lines.append((is_bullet, line))
+    return lines
+
+
+@app.post("/report/export")
+def export_report(
+    export_in: ReportExportIn,
+    export_format: str = Query(..., alias="format"),
+    current_user: User = Depends(get_current_user),
+):
+    if export_format not in ("docx", "pdf"):
+        raise HTTPException(status_code=400, detail="Unsupported export format.")
+
+    title = (export_in.title or "Report").strip() or "Report"
+    lines = parse_report_lines(export_in.report)
+
+    if export_format == "docx":
+        from docx import Document as ExportDocxDocument
+
+        doc = ExportDocxDocument()
+        doc.add_heading(title, level=1)
+        for is_bullet, text in lines:
+            doc.add_paragraph(text, style="List Bullet" if is_bullet else None)
+
+        if export_in.sources:
+            doc.add_heading("Sources", level=2)
+            for source_name in export_in.sources:
+                doc.add_paragraph(source_name, style="List Bullet")
+
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": "attachment; filename=cognexa_report.docx"},
+        )
+
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+    def escape(text):
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=LETTER)
+    styles = getSampleStyleSheet()
+    story = [Paragraph(escape(title), styles["Title"]), Spacer(1, 12)]
+
+    for is_bullet, text in lines:
+        prefix = "• " if is_bullet else ""
+        story.append(Paragraph(f"{prefix}{escape(text)}", styles["BodyText"]))
+        story.append(Spacer(1, 8))
+
+    if export_in.sources:
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("Sources", styles["Heading2"]))
+        for source_name in export_in.sources:
+            story.append(Paragraph(f"• {escape(source_name)}", styles["BodyText"]))
+
+    doc.build(story)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=cognexa_report.pdf"},
+    )
 
 
 @app.get("/settings", response_model=SettingsOut)
@@ -896,6 +1402,162 @@ def delete_integration(
     db.commit()
 
     return {"deleted": integration_id}
+
+
+def data_source_to_out(connection: DataSourceConnection) -> dict:
+    return {
+        "id": connection.id,
+        "source_name": connection.source_name,
+        "connected": bool(connection.credential),
+        "created_at": connection.created_at,
+    }
+
+
+@app.get("/data-sources", response_model=list[DataSourceConnectionOut])
+def list_data_sources(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    connections = (
+        db.query(DataSourceConnection)
+        .filter(DataSourceConnection.user_id == current_user.id)
+        .order_by(DataSourceConnection.created_at.asc())
+        .all()
+    )
+    return [data_source_to_out(c) for c in connections]
+
+
+@app.post("/data-sources", response_model=DataSourceConnectionOut)
+def create_data_source(
+    connection_in: DataSourceConnectionIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    plan = current_user.plan or "community"
+    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["community"])
+    max_apps = limits["max_apps"]
+
+    existing_count = (
+        db.query(DataSourceConnection)
+        .filter(DataSourceConnection.user_id == current_user.id)
+        .count()
+    )
+    if max_apps is not None and existing_count >= max_apps:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"{PLAN_DISPLAY_NAMES.get(plan, plan.capitalize())} plan allows up to "
+                f"{max_apps} connected app(s). Remove one or upgrade your plan."
+            ),
+        )
+
+    connection = DataSourceConnection(
+        user_id=current_user.id,
+        source_name=connection_in.source_name,
+        credential=connection_in.credential or None,
+    )
+    db.add(connection)
+    db.commit()
+    db.refresh(connection)
+
+    return data_source_to_out(connection)
+
+
+@app.delete("/data-sources/{connection_id}")
+def delete_data_source(
+    connection_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    connection = (
+        db.query(DataSourceConnection)
+        .filter(DataSourceConnection.id == connection_id, DataSourceConnection.user_id == current_user.id)
+        .first()
+    )
+    if not connection:
+        raise HTTPException(status_code=404, detail="Data source connection not found")
+
+    db.delete(connection)
+    db.commit()
+
+    return {"deleted": connection_id}
+
+
+def chat_channel_to_out(channel: ChatChannel) -> dict:
+    return {
+        "id": channel.id,
+        "channel_name": channel.channel_name,
+        "connected": bool(channel.bot_token),
+        "created_at": channel.created_at,
+    }
+
+
+@app.get("/chat-channels", response_model=list[ChatChannelOut])
+def list_chat_channels(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    channels = (
+        db.query(ChatChannel)
+        .filter(ChatChannel.user_id == current_user.id)
+        .order_by(ChatChannel.created_at.asc())
+        .all()
+    )
+    return [chat_channel_to_out(c) for c in channels]
+
+
+@app.post("/chat-channels", response_model=ChatChannelOut)
+def create_chat_channel(
+    channel_in: ChatChannelIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    plan = current_user.plan or "community"
+    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["community"])
+    max_chat_channels = limits["max_chat_channels"]
+
+    existing_count = (
+        db.query(ChatChannel).filter(ChatChannel.user_id == current_user.id).count()
+    )
+    if max_chat_channels is not None and existing_count >= max_chat_channels:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"{PLAN_DISPLAY_NAMES.get(plan, plan.capitalize())} plan allows up to "
+                f"{max_chat_channels} connected chat channel(s). Remove one or upgrade your plan."
+            ),
+        )
+
+    channel = ChatChannel(
+        user_id=current_user.id,
+        channel_name=channel_in.channel_name,
+        bot_token=channel_in.bot_token or None,
+    )
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+
+    return chat_channel_to_out(channel)
+
+
+@app.delete("/chat-channels/{channel_id}")
+def delete_chat_channel(
+    channel_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    channel = (
+        db.query(ChatChannel)
+        .filter(ChatChannel.id == channel_id, ChatChannel.user_id == current_user.id)
+        .first()
+    )
+    if not channel:
+        raise HTTPException(status_code=404, detail="Chat channel not found")
+
+    db.delete(channel)
+    db.commit()
+
+    return {"deleted": channel_id}
 
 
 @app.get("/stats", response_model=StatsOut)
@@ -1072,13 +1734,22 @@ async def restore_account(
             setattr(settings, field, value)
 
     db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
-    for m in backup.get("chat_messages") or []:
-        db.add(ChatMessage(
-            user_id=current_user.id,
-            question=m.get("question", ""),
-            answer=m.get("answer", ""),
-            sources=m.get("sources"),
-        ))
+    db.query(ChatSession).filter(ChatSession.user_id == current_user.id).delete()
+
+    restored_messages = backup.get("chat_messages") or []
+    if restored_messages:
+        restored_session = ChatSession(user_id=current_user.id, title="Restored conversation")
+        db.add(restored_session)
+        db.flush()
+
+        for m in restored_messages:
+            db.add(ChatMessage(
+                user_id=current_user.id,
+                session_id=restored_session.id,
+                question=m.get("question", ""),
+                answer=m.get("answer", ""),
+                sources=m.get("sources"),
+            ))
 
     plan = current_user.plan or "community"
     max_integrations = INTEGRATION_LIMITS.get(plan, INTEGRATION_LIMITS["community"])
@@ -1120,6 +1791,7 @@ def delete_account(
         db.delete(document)
 
     db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
+    db.query(ChatSession).filter(ChatSession.user_id == current_user.id).delete()
     db.query(Integration).filter(Integration.user_id == current_user.id).delete()
     db.query(Settings).filter(Settings.user_id == current_user.id).delete()
 
