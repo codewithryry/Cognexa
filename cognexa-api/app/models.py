@@ -35,6 +35,13 @@ class Document(Base):
     content_hash = Column(String(64), nullable=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
+    # Set only for documents pulled in by a data source sync (e.g. Google Drive)
+    # rather than a manual /upload — lets a re-sync tell "already ingested" from
+    # "removed at the source" apart via external_id, without touching manual uploads.
+    source_type = Column(String(30), nullable=True)
+    data_source_id = Column(Integer, ForeignKey("data_source_connections.id"), nullable=True, index=True)
+    external_id = Column(String(255), nullable=True, index=True)
+
     owner = relationship("User", back_populates="documents")
 
 
@@ -73,7 +80,13 @@ class DataSourceConnection(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     source_name = Column(String(100), nullable=False)
-    credential = Column(String(255), nullable=True)
+    credential = Column(Text, nullable=True)
+    # JSON-encoded, source-specific config — e.g. for Google Drive: name,
+    # primary_admin_email, my_drive_emails, shared_folder_urls, sync_deleted.
+    config = Column(Text, nullable=True)
+    status = Column(String(20), nullable=True)
+    status_message = Column(Text, nullable=True)
+    last_synced_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 

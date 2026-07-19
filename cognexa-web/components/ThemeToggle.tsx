@@ -1,19 +1,28 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTheme } from "@/lib/ThemeContext";
 
 export default function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
+  // The server always renders assuming the default "dark" theme (there's no
+  // localStorage access during SSR), while a beforeInteractive script in
+  // layout.tsx may flip the real theme from localStorage before hydration.
+  // Render the same "dark" icon on both server and first client render, and
+  // only reflect the real theme once mounted, to avoid a hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const displayTheme = mounted ? theme : "dark";
 
   return (
     <button
       type="button"
       onClick={toggleTheme}
-      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={displayTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      title={displayTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       className="flex h-9 w-9 items-center justify-center text-gray-500 transition hover:text-gray-900 dark:text-slate-400 dark:hover:text-white"
     >
-      {theme === "dark" ? (
+      {displayTheme === "dark" ? (
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"

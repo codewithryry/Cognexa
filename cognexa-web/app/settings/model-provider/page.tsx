@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   createIntegration,
   deleteIntegration,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
 import DemoCheckoutModal from "@/components/DemoCheckoutModal";
+import SetupGuideLink from "@/components/SetupGuideLink";
 
 const DEFAULT_SETTINGS: SettingsPayload = {
   ollama_url: "http://localhost:11434",
@@ -108,7 +110,16 @@ const PROVIDERS: ProviderOption[] = [
 ];
 
 export default function ModelProviderSettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ModelProviderSettingsPageInner />
+    </Suspense>
+  );
+}
+
+function ModelProviderSettingsPageInner() {
   const { notify, confirm } = useDialog();
+  const searchParams = useSearchParams();
 
   const [settings, setSettings] = useState<SettingsPayload>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
@@ -149,6 +160,19 @@ export default function ModelProviderSettingsPage() {
       handleProviderChange("OpenRouter");
     } else if (!provider.models.includes(model)) {
       setModel(provider.models[0] ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCommunity]);
+
+  // Deep-linked from the Quick Setup dialog ("Connect to Ollama" / "Use BYOK")
+  // -- preselect the matching provider once the plan-gated list is known.
+  useEffect(() => {
+    const setup = searchParams.get("setup");
+    if (!setup || isCommunity) return;
+    if (setup === "ollama") {
+      handleProviderChange("Ollama (Local)");
+    } else if (setup === "byok" && providerName === "Ollama (Local)") {
+      handleProviderChange("Cline");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCommunity]);
@@ -380,6 +404,12 @@ export default function ModelProviderSettingsPage() {
               </div>
             </label>
 
+            <p className="-mt-1 rounded-xl bg-gray-50 dark:bg-gray-800/60 p-3 text-xs text-gray-500 dark:text-gray-400">
+              {provider.local
+                ? "Ollama allows you to run AI models locally on your machine, providing offline access and keeping your data on your device."
+                : "Bring Your Own Key (BYOK) lets you connect your own API key from supported AI providers, giving you full control over the model you use."}
+            </p>
+
             {provider.local ? (
               <label className="block">
                 <span className="mb-1.5 block text-sm font-medium text-gray-600 dark:text-gray-300">
@@ -512,6 +542,8 @@ export default function ModelProviderSettingsPage() {
             >
               {savingCline ? "Saving..." : "Save Integration"}
             </button>
+
+            <SetupGuideLink />
           </div>
         )}
       </div>

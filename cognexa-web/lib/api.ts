@@ -557,11 +557,30 @@ export async function deleteIntegration(id: number) {
 }
 
 // Data source connections (Google Drive, GitHub, MkDocs, etc.)
+export interface GoogleDriveConfig {
+  name: string;
+  primary_admin_email: string;
+  my_drive_emails: string[];
+  shared_folder_urls: string[];
+  sync_deleted: boolean;
+}
+
 export interface DataSourcePayload {
   id: number;
   source_name: string;
   connected: boolean;
+  status: string | null;
+  status_message: string | null;
+  last_synced_at: string | null;
+  config: GoogleDriveConfig | null;
   created_at: string | null;
+}
+
+export interface DataSourceSyncResult {
+  added: number;
+  removed: number;
+  skipped: number;
+  errors: string[];
 }
 
 export async function getDataSources(): Promise<DataSourcePayload[]> {
@@ -578,12 +597,13 @@ export async function getDataSources(): Promise<DataSourcePayload[]> {
 
 export async function createDataSource(
   sourceName: string,
-  credential: string | null
+  credential: string | null,
+  config?: GoogleDriveConfig
 ): Promise<DataSourcePayload> {
   const response = await fetch(`${API_URL}/data-sources`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ source_name: sourceName, credential }),
+    body: JSON.stringify({ source_name: sourceName, credential, config: config ?? null }),
   });
 
   if (!response.ok) {
@@ -602,6 +622,20 @@ export async function deleteDataSource(id: number) {
 
   if (!response.ok) {
     throw new Error("Failed to disconnect data source.");
+  }
+
+  return response.json();
+}
+
+export async function syncDataSource(id: number): Promise<DataSourceSyncResult> {
+  const response = await fetch(`${API_URL}/data-sources/${id}/sync`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to sync data source.");
   }
 
   return response.json();

@@ -136,6 +136,28 @@ If you know which document should contain the answer, mentioning it in your ques
 If an answer feels incomplete, rephrasing or narrowing the question is usually faster than assuming the information isn't in your dataset at all.`,
   },
   {
+    slug: "setting-up-your-ai-provider",
+    title: "Setting Up Your AI Provider",
+    summary: "Ollama vs. BYOK, and how to connect either one in a few minutes.",
+    body: `Before Cognexa can chat or answer questions about your documents, it needs an AI provider to generate answers with — either a local Ollama instance, or your own API key from a hosted provider (BYOK). Uploading and indexing documents doesn't require this, but asking questions does.
+
+## Ollama (Local AI)
+
+Ollama lets you run AI models locally on your own machine. That means offline access and your data never leaves your device — the same model that reads your documents also generates the answer, entirely on your hardware.
+
+To connect it: install Ollama, make sure it's running, then go to **Settings > Model Provider**, choose **Ollama (Local)**, and confirm the base URL (defaults to \`http://localhost:11434\`).
+
+## BYOK (Bring Your Own Key)
+
+BYOK lets you connect your own API key from a supported hosted provider — OpenAI, Anthropic Claude, Google Gemini, Cohere, OpenRouter, or Cline — giving you full control over exactly which model answers your questions.
+
+To connect it: go to **Settings > Model Provider**, pick a provider, paste your API key, and choose a model.
+
+## Which one should I use?
+
+Ollama keeps everything on your machine and works offline, but needs a capable local machine to run well. BYOK needs no local setup and can use more powerful hosted models, but sends prompts to that provider per its own terms. Either one is enough to unlock chat and Q&A — you can also connect both and switch between them per question.`,
+  },
+  {
     slug: "faqs",
     title: "Frequently Asked Questions",
     summary: "Quick answers to the questions new users ask most.",

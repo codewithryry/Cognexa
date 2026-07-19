@@ -11,6 +11,8 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { useDialog } from "@/lib/DialogContext";
+import useAIProviderStatus from "@/lib/useAIProviderStatus";
+import AIProviderNotice from "@/components/AIProviderNotice";
 
 interface Stats {
   total_documents: number;
@@ -54,6 +56,7 @@ export default function DashboardPage() {
   const [askInput, setAskInput] = useState("");
   const { notify } = useDialog();
   const { user } = useAuth();
+  const aiProvider = useAIProviderStatus();
   const router = useRouter();
 
   useEffect(() => {
@@ -123,6 +126,10 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      {!aiProvider.loading && !aiProvider.connected && (
+        <AIProviderNotice variant="dashboard" />
+      )}
+
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="shrink-0">
           <h1 className="text-2xl font-bold sm:text-3xl">

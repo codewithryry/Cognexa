@@ -12,14 +12,28 @@ client = chromadb.PersistentClient(
     path=VECTOR_PATH
 )
 
-collection = client.get_or_create_collection(
-    name="cognexa_docs"
-)
-
 
 model = SentenceTransformer(
     "all-MiniLM-L6-v2"
 )
+
+
+def user_collection_name(user_id):
+    return f"user_{user_id}_docs"
+
+
+def get_user_collection(user_id):
+    """Every user gets their own Chroma collection, so a brand-new user (or a
+    user whose collection was previously dropped) always starts from a clean,
+    empty index with no other user's embeddings or metadata reachable from it."""
+    return client.get_or_create_collection(name=user_collection_name(user_id))
+
+
+def delete_user_collection(user_id):
+    try:
+        client.delete_collection(name=user_collection_name(user_id))
+    except Exception:
+        pass
 
 
 def process_document(text, filename, user_id, document_id, chunk_size=500, chunk_overlap=0):
@@ -42,10 +56,12 @@ def process_document(text, filename, user_id, document_id, chunk_size=500, chunk
 
 
     ids = [
-        f"user{user_id}_doc{document_id}_{i}"
+        f"doc{document_id}_{i}"
         for i in range(len(chunks))
     ]
 
+
+    collection = get_user_collection(user_id)
 
     collection.add(
         documents=chunks,
@@ -67,5 +83,6 @@ def process_document(text, filename, user_id, document_id, chunk_size=500, chunk
     }
 
 
-def delete_document_chunks(document_id):
+def delete_document_chunks(user_id, document_id):
+    collection = get_user_collection(user_id)
     collection.delete(where={"document_id": document_id})

@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
+import QuickSetupDialog from "@/components/QuickSetupDialog";
 import AuthProvider from "@/lib/AuthContext";
 import ThemeProvider from "@/lib/ThemeContext";
 import DialogProvider from "@/lib/DialogContext";
@@ -36,6 +37,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <ThemeProvider>
       <DialogProvider>
         <AuthProvider>
+          <QuickSetupDialog />
           <div className="flex min-h-screen bg-[#f7f7fb] dark:bg-[#0b0b14]">
             <Sidebar />
 

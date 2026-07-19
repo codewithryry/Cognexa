@@ -32,7 +32,8 @@ from app.models import (
     Settings,
     User,
 )
-from app.rag import delete_document_chunks, process_document
+from app.google_drive import sync_connection as sync_google_drive_connection
+from app.rag import delete_document_chunks, delete_user_collection, process_document
 from app.query import generate_answer_stream, generate_report
 from app.scheduler import PriorityWorkerPool, PrioritySlotGate, plan_priority
 from app.schemas import (
@@ -43,6 +44,7 @@ from app.schemas import (
     ChatSessionRenameIn,
     DataSourceConnectionIn,
     DataSourceConnectionOut,
+    DataSourceSyncOut,
     DbStatusOut,
     DocumentOut,
     GeneratedReportOut,
@@ -132,6 +134,55 @@ def ensure_chat_message_session_column():
 
 
 ensure_chat_message_session_column()
+
+
+def ensure_data_source_connection_columns():
+    """data_source_connections predates config/status/last_synced_at (added for
+    the Google Drive connector) -- add them by hand if missing, same pattern as
+    ensure_chat_message_session_column above."""
+    inspector = inspect(engine)
+    existing_columns = {col["name"]: col for col in inspector.get_columns("data_source_connections")}
+    columns = set(existing_columns)
+    credential_col = existing_columns.get("credential")
+
+    with engine.connect() as conn:
+        if credential_col is not None and "TEXT" not in str(credential_col["type"]).upper():
+            # Service account JSON keys are far longer than the original
+            # VARCHAR(255) credential column allowed.
+            conn.execute(text("ALTER TABLE data_source_connections MODIFY credential TEXT NULL"))
+        if "config" not in columns:
+            conn.execute(text("ALTER TABLE data_source_connections ADD COLUMN config TEXT NULL"))
+        if "status" not in columns:
+            conn.execute(text("ALTER TABLE data_source_connections ADD COLUMN status VARCHAR(20) NULL"))
+        if "status_message" not in columns:
+            conn.execute(text("ALTER TABLE data_source_connections ADD COLUMN status_message TEXT NULL"))
+        if "last_synced_at" not in columns:
+            conn.execute(text("ALTER TABLE data_source_connections ADD COLUMN last_synced_at TIMESTAMP NULL"))
+        conn.commit()
+
+
+ensure_data_source_connection_columns()
+
+
+def ensure_document_source_columns():
+    """documents predates source_type/data_source_id/external_id (added so a
+    Google Drive sync can tell an already-imported file from one removed at
+    the source) -- add them by hand if missing."""
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("documents")}
+    if "external_id" in columns:
+        return
+
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE documents ADD COLUMN source_type VARCHAR(30) NULL"))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN data_source_id INTEGER NULL"))
+        conn.execute(text("ALTER TABLE documents ADD COLUMN external_id VARCHAR(255) NULL"))
+        conn.execute(text("ALTER TABLE documents ADD INDEX ix_documents_data_source_id (data_source_id)"))
+        conn.execute(text("ALTER TABLE documents ADD INDEX ix_documents_external_id (external_id)"))
+        conn.commit()
+
+
+ensure_document_source_columns()
 
 
 def migrate_orphan_chat_messages():
@@ -648,7 +699,7 @@ def reindex_document(
     settings = get_or_create_settings(db, current_user.id)
     plan = current_user.plan or "community"
 
-    delete_document_chunks(document.id)
+    delete_document_chunks(current_user.id, document.id)
     document.chunks = 0
     db.commit()
 
@@ -684,7 +735,7 @@ def delete_document(
     if document.file_path and os.path.exists(document.file_path):
         os.remove(document.file_path)
 
-    delete_document_chunks(document.id)
+    delete_document_chunks(current_user.id, document.id)
 
     db.delete(document)
     db.commit()
@@ -702,7 +753,7 @@ def delete_all_documents(
     for document in documents:
         if document.file_path and os.path.exists(document.file_path):
             os.remove(document.file_path)
-        delete_document_chunks(document.id)
+        delete_document_chunks(current_user.id, document.id)
         db.delete(document)
 
     db.commit()
@@ -1409,6 +1460,11 @@ def data_source_to_out(connection: DataSourceConnection) -> dict:
         "id": connection.id,
         "source_name": connection.source_name,
         "connected": bool(connection.credential),
+        "status": connection.status,
+        "status_message": connection.status_message,
+        "last_synced_at": connection.last_synced_at,
+        # Never echo the credential (service account key) back to the client.
+        "config": json.loads(connection.config) if connection.config else None,
         "created_at": connection.created_at,
     }
 
@@ -1451,10 +1507,41 @@ def create_data_source(
             ),
         )
 
+    config_json = None
+    status = None
+
+    if connection_in.source_name == "Google Drive":
+        if not connection_in.credential:
+            raise HTTPException(
+                status_code=400,
+                detail="A service account OAuth Token JSON file is required for Google Drive.",
+            )
+        if not connection_in.config:
+            raise HTTPException(
+                status_code=400,
+                detail="Name and Primary Admin Email are required for Google Drive.",
+            )
+        try:
+            parsed_credential = json.loads(connection_in.credential)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=400,
+                detail="The OAuth Token JSON file isn't valid JSON.",
+            )
+        if parsed_credential.get("type") != "service_account":
+            raise HTTPException(
+                status_code=400,
+                detail="That doesn't look like a Google service account key (missing type=service_account).",
+            )
+        config_json = json.dumps(connection_in.config.model_dump())
+        status = "connected"
+
     connection = DataSourceConnection(
         user_id=current_user.id,
         source_name=connection_in.source_name,
         credential=connection_in.credential or None,
+        config=config_json,
+        status=status,
     )
     db.add(connection)
     db.commit()
@@ -1477,10 +1564,66 @@ def delete_data_source(
     if not connection:
         raise HTTPException(status_code=404, detail="Data source connection not found")
 
+    # Documents already synced from this connection stay in the dataset --
+    # only unlink them from the connection being removed (its FK would
+    # otherwise block deletion).
+    db.query(Document).filter(Document.data_source_id == connection.id).update(
+        {Document.data_source_id: None}
+    )
+
     db.delete(connection)
     db.commit()
 
     return {"deleted": connection_id}
+
+
+@app.post("/data-sources/{connection_id}/sync", response_model=DataSourceSyncOut)
+def sync_data_source(
+    connection_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    connection = (
+        db.query(DataSourceConnection)
+        .filter(DataSourceConnection.id == connection_id, DataSourceConnection.user_id == current_user.id)
+        .first()
+    )
+    if not connection:
+        raise HTTPException(status_code=404, detail="Data source connection not found")
+
+    if connection.source_name != "Google Drive":
+        raise HTTPException(status_code=400, detail="Syncing isn't supported for this data source yet.")
+
+    plan = current_user.plan or "community"
+    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["community"])
+    document_count, storage_bytes = get_plan_usage(db, current_user.id)
+    if limits["max_documents"] is not None and document_count >= limits["max_documents"]:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"{PLAN_DISPLAY_NAMES.get(plan, plan.capitalize())} plan limit reached "
+                f"({limits['max_documents']} documents). Upgrade your plan to sync more."
+            ),
+        )
+
+    settings = get_or_create_settings(db, current_user.id)
+
+    try:
+        result = sync_google_drive_connection(
+            db,
+            connection,
+            extract_document_text,
+            UPLOAD_FOLDER,
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
+    except Exception as exc:
+        connection.status = "error"
+        connection.status_message = f"Sync failed: {exc}"
+        db.commit()
+        raise HTTPException(status_code=502, detail=f"Google Drive sync failed: {exc}")
+
+    return result
 
 
 def chat_channel_to_out(channel: ChatChannel) -> dict:
@@ -1787,8 +1930,9 @@ def delete_account(
     for document in documents:
         if document.file_path and os.path.exists(document.file_path):
             os.remove(document.file_path)
-        delete_document_chunks(document.id)
         db.delete(document)
+
+    delete_user_collection(current_user.id)
 
     db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
     db.query(ChatSession).filter(ChatSession.user_id == current_user.id).delete()

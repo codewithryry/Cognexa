@@ -14,7 +14,8 @@ import {
   ReportPayload,
 } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
-import useModelSetupWarning from "@/lib/useModelSetupWarning";
+import useAIProviderStatus from "@/lib/useAIProviderStatus";
+import AIProviderNotice from "@/components/AIProviderNotice";
 import DocumentFilter from "@/components/DocumentFilter";
 
 interface ChatMessage {
@@ -73,7 +74,7 @@ function ChatPageInner() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const providerMenuRef = useRef<HTMLDivElement>(null);
   const { confirm, notify } = useDialog();
-  useModelSetupWarning();
+  const aiProvider = useAIProviderStatus();
   const searchParams = useSearchParams();
   const router = useRouter();
   const autoSentRef = useRef(false);
@@ -104,7 +105,13 @@ function ChatPageInner() {
       try {
         const sessions = await getChatSessions();
         const requestedId = Number(searchParams.get("session"));
-        const target = sessions.find((s) => s.id === requestedId) ?? sessions[0];
+        // Coming from a dataset's "Ask AI" button (a `doc` param with no explicit
+        // `session`) should always start a fresh chat instead of resuming whatever
+        // chat was last used — don't fall back to sessions[0] in that case.
+        const startFresh = !searchParams.get("session") && searchParams.get("doc");
+        const target = startFresh
+          ? undefined
+          : sessions.find((s) => s.id === requestedId) ?? sessions[0];
         if (cancelled) return;
 
         // No session yet — leave sessionId null instead of eagerly creating one here.
@@ -301,18 +308,28 @@ function ChatPageInner() {
     URL.revokeObjectURL(url);
   }
 
+  if (!aiProvider.loading && !aiProvider.connected) {
+    return (
+      <div className="flex h-[calc(100vh-8rem)] items-center justify-center">
+        <AIProviderNotice variant="chat" className="max-w-md" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-[calc(100vh-8rem)] flex-col">
       <div className="flex-1 overflow-y-auto rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
         <div className="space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xs font-semibold text-white">
-              CX
+          {!loading && messages.length === 0 && (
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xs font-semibold text-white">
+                CX
+              </div>
+              <div className="max-w-lg rounded-2xl rounded-tl-sm bg-gray-100 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                Hello! Ask me anything about your uploaded documents.
+              </div>
             </div>
-            <div className="max-w-lg rounded-2xl rounded-tl-sm bg-gray-100 dark:bg-gray-800 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-              Hello! Ask me anything about your uploaded documents.
-            </div>
-          </div>
+          )}
 
           {loading && (
             <p className="text-sm text-gray-400">Loading conversation...</p>

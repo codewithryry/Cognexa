@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { getBillingPlan, getDocuments, PlanPayload, uploadDocument } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
-import useModelSetupWarning from "@/lib/useModelSetupWarning";
+import useAIProviderStatus from "@/lib/useAIProviderStatus";
+import AIProviderNotice from "@/components/AIProviderNotice";
 import DemoCheckoutModal from "@/components/DemoCheckoutModal";
 
 interface UploadResult {
@@ -32,7 +33,7 @@ export default function UploadPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { notify } = useDialog();
-  useModelSetupWarning();
+  const aiProvider = useAIProviderStatus();
 
   function loadRecentUploads() {
     getDocuments()
@@ -129,6 +130,14 @@ export default function UploadPage() {
     }
   }
 
+  if (!aiProvider.loading && !aiProvider.connected) {
+    return (
+      <div className="space-y-8">
+        <AIProviderNotice variant="upload" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {limitReached && (
@@ -162,9 +171,6 @@ export default function UploadPage() {
             : "border-indigo-200 dark:border-indigo-500/30 bg-white dark:bg-gray-900 hover:border-indigo-400 hover:bg-indigo-50/30 dark:hover:bg-indigo-500/5"
         }`}
       >
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-2xl shadow-lg shadow-indigo-500/30">
-          📤
-        </div>
 
         <h2 className="mt-5 text-xl font-semibold text-gray-900 dark:text-gray-100">
           {selectedFile ? selectedFile.name : "Drag & Drop Files Here"}

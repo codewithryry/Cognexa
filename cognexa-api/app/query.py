@@ -1,10 +1,10 @@
 import json
 
-import chromadb
 import httpx
 import requests
-from sentence_transformers import SentenceTransformer
 import ollama
+
+from app.rag import get_user_collection, model
 
 
 # Well-known, publicly documented API base URLs for each provider's own
@@ -243,21 +243,9 @@ def stream_external_provider(provider_name, api_key, base_url, model, system_pro
         raise ValueError(f"Unsupported provider style: {style}")
 
 
-client = chromadb.PersistentClient(
-    path="app/vector_db"
-)
-
-collection = client.get_collection(
-    name="cognexa_docs"
-)
-
-
-model = SentenceTransformer(
-    "all-MiniLM-L6-v2"
-)
-
-
 def search_document(question, user_id, document_ids=None, limit=8, pool_size=24, per_doc_cap=2):
+
+    collection = get_user_collection(user_id)
 
     query_embedding = model.encode(
         [question]
@@ -268,7 +256,7 @@ def search_document(question, user_id, document_ids=None, limit=8, pool_size=24,
         # global similarity query, which lets one large/dominant document's
         # chunks crowd the whole result pool and starve the others out before
         # the per-document cap below ever gets a chance to run.
-        existing = collection.get(where={"user_id": user_id}, include=["metadatas"])
+        existing = collection.get(include=["metadatas"])
         document_ids = sorted({
             meta.get("document_id")
             for meta in (existing.get("metadatas") or [])
@@ -286,24 +274,18 @@ def search_document(question, user_id, document_ids=None, limit=8, pool_size=24,
         # candidate pool regardless of how its chunks rank against the others.
         per_doc_pool = max(per_doc_cap, pool_size // max(len(document_ids), 1))
         for doc_id in document_ids:
-            where = {"$and": [{"user_id": user_id}, {"document_id": doc_id}]}
             results = collection.query(
                 query_embeddings=query_embedding,
                 n_results=per_doc_pool,
-                where=where,
+                where={"document_id": doc_id},
             )
             docs = results["documents"][0] if results["documents"] else []
             metas = results["metadatas"][0] if results["metadatas"] else []
             per_doc_candidates.append(list(zip(docs, metas)))
     else:
-        where = {"user_id": user_id}
+        where = None
         if document_ids:
-            where = {
-                "$and": [
-                    {"user_id": user_id},
-                    {"document_id": {"$in": document_ids}},
-                ]
-            }
+            where = {"document_id": {"$in": document_ids}}
         results = collection.query(
             query_embeddings=query_embedding,
             n_results=pool_size,

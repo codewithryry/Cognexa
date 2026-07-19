@@ -23,6 +23,9 @@ filelock==3.30.2
 flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2026.6.0
+google-api-python-client==2.185.0
+google-auth==2.42.1
+google-auth-httplib2==0.2.0
 googleapis-common-protos==1.75.0
 greenlet==3.5.3
 grpcio==1.82.1

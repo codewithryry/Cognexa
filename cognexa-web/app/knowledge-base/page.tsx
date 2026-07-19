@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   deleteDocument,
@@ -11,6 +12,7 @@ import {
   SettingsPayload,
 } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
+import useAIProviderStatus from "@/lib/useAIProviderStatus";
 
 interface DocumentItem {
   id: number;
@@ -75,6 +77,7 @@ function KnowledgeBasePageInner() {
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [reindexingId, setReindexingId] = useState<number | null>(null);
   const { confirm, notify } = useDialog();
+  const aiProvider = useAIProviderStatus();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -404,12 +407,25 @@ function KnowledgeBasePageInner() {
           <div className="text-5xl">📂</div>
 
           <h2 className="mt-4 text-xl font-semibold text-gray-900 dark:text-gray-100">
-            No documents found
+            {aiProvider.loading || aiProvider.connected
+              ? "No documents found"
+              : "Your knowledge base is empty"}
           </h2>
 
           <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Upload your first PDF or DOCX document.
+            {aiProvider.loading || aiProvider.connected
+              ? "Upload your first PDF or DOCX document."
+              : "Configure an AI provider, then upload documents to start building your knowledge base."}
           </p>
+
+          {!aiProvider.loading && !aiProvider.connected && (
+            <Link
+              href="/settings/model-provider"
+              className="mt-5 inline-block rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-6 py-2.5 text-sm font-medium text-white shadow-md shadow-indigo-500/20 transition hover:shadow-lg"
+            >
+              Configure Now
+            </Link>
+          )}
         </div>
       ) : filteredDocuments.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-14 text-center">

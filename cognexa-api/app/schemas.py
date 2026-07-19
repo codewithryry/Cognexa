@@ -85,19 +85,39 @@ class IntegrationOut(BaseModel):
         from_attributes = True
 
 
+class GoogleDriveConfig(BaseModel):
+    name: str
+    primary_admin_email: str
+    my_drive_emails: list[str] = []
+    shared_folder_urls: list[str] = []
+    sync_deleted: bool = True
+
+
 class DataSourceConnectionIn(BaseModel):
     source_name: str
     credential: str | None = None
+    config: GoogleDriveConfig | None = None
 
 
 class DataSourceConnectionOut(BaseModel):
     id: int
     source_name: str
     connected: bool
+    status: str | None = None
+    status_message: str | None = None
+    last_synced_at: datetime | None = None
+    config: GoogleDriveConfig | None = None
     created_at: datetime | None = None
 
     class Config:
         from_attributes = True
+
+
+class DataSourceSyncOut(BaseModel):
+    added: int
+    removed: int
+    skipped: int
+    errors: list[str] = []
 
 
 class ChatChannelIn(BaseModel):
