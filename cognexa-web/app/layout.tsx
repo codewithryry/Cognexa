@@ -36,6 +36,7 @@ export default function RootLayout({
         <Script id="theme-init" strategy="beforeInteractive">
           {THEME_INIT_SCRIPT}
         </Script>
+        <Script src="https://apis.google.com/js/api.js" strategy="lazyOnload" />
       </head>
       <body>
         <AppShell>{children}</AppShell>

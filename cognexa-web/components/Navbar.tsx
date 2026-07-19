@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import HelpMenu from "@/components/HelpMenu";
 import NotificationsMenu from "@/components/NotificationsMenu";
 import ProfileMenu from "@/components/ProfileMenu";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -41,6 +42,7 @@ export default function Navbar() {
 
       <div className="flex shrink-0 items-center gap-3">
         <ThemeToggle />
+        <HelpMenu />
         <NotificationsMenu />
         <ProfileMenu />
       </div>

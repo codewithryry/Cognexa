@@ -557,12 +557,15 @@ export async function deleteIntegration(id: number) {
 }
 
 // Data source connections (Google Drive, GitHub, MkDocs, etc.)
-export interface GoogleDriveConfig {
+export interface GoogleDriveFolder {
+  id: string;
   name: string;
-  primary_admin_email: string;
-  my_drive_emails: string[];
-  shared_folder_urls: string[];
+}
+
+export interface GoogleDriveConfig {
   sync_deleted: boolean;
+  account_email: string | null;
+  folders: GoogleDriveFolder[];
 }
 
 export interface DataSourcePayload {
@@ -572,15 +575,14 @@ export interface DataSourcePayload {
   status: string | null;
   status_message: string | null;
   last_synced_at: string | null;
+  synced_size_bytes: number;
   config: GoogleDriveConfig | null;
   created_at: string | null;
 }
 
-export interface DataSourceSyncResult {
-  added: number;
-  removed: number;
-  skipped: number;
-  errors: string[];
+export interface DataSourceSyncStarted {
+  started: boolean;
+  status: string;
 }
 
 export async function getDataSources(): Promise<DataSourcePayload[]> {
@@ -614,6 +616,57 @@ export async function createDataSource(
   return response.json();
 }
 
+// Redirects the browser through Google's consent screen; on success Google
+// redirects back to /settings/data-sources?connected=1 with the new
+// connection already created server-side.
+export async function getGoogleDriveAuthorizeUrl(): Promise<{ url: string }> {
+  const response = await fetch(`${API_URL}/data-sources/google-drive/authorize`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to start Google Drive connection.");
+  }
+
+  return response.json();
+}
+
+// A short-lived access token to feed into the Google Picker widget so it can
+// browse the connection's own Drive account.
+export async function getGoogleDrivePickerToken(
+  connectionId: number
+): Promise<{ access_token: string; expires_in: number }> {
+  const response = await fetch(`${API_URL}/data-sources/${connectionId}/google-drive/picker-token`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to get a Google Drive access token.");
+  }
+
+  return response.json();
+}
+
+export async function updateGoogleDriveFolders(
+  connectionId: number,
+  folders: GoogleDriveFolder[]
+): Promise<DataSourcePayload> {
+  const response = await fetch(`${API_URL}/data-sources/${connectionId}/google-drive/folders`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ folders }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update synced folders.");
+  }
+
+  return response.json();
+}
+
 export async function deleteDataSource(id: number) {
   const response = await fetch(`${API_URL}/data-sources/${id}`, {
     method: "DELETE",
@@ -627,7 +680,7 @@ export async function deleteDataSource(id: number) {
   return response.json();
 }
 
-export async function syncDataSource(id: number): Promise<DataSourceSyncResult> {
+export async function syncDataSource(id: number): Promise<DataSourceSyncStarted> {
   const response = await fetch(`${API_URL}/data-sources/${id}/sync`, {
     method: "POST",
     headers: authHeaders(),

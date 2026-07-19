@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -88,6 +88,10 @@ class DataSourceConnection(Base):
     status_message = Column(Text, nullable=True)
     last_synced_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    # Sum of size_bytes across Documents currently synced from this
+    # connection (not the account's total Drive quota) — recomputed at the
+    # end of every sync.
+    synced_size_bytes = Column(BigInteger, nullable=True, default=0)
 
 
 class ChatChannel(Base):

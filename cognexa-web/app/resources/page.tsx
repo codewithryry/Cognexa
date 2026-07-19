@@ -74,44 +74,35 @@ export default function Resources() {
           </p>
         </div>
 
-        <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {RESOURCE_CARDS.map((card) => (
-            <Link
-              key={card.title}
-              href={card.href}
-              className="group flex flex-col rounded-2xl border border-gray-200 bg-white p-6 transition hover:-translate-y-1 hover:border-transparent hover:shadow-xl hover:shadow-indigo-500/10 dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-transparent dark:hover:shadow-indigo-500/20"
+        <div className="mt-16 grid gap-5 sm:grid-cols-3">
+          {RESOURCE_GROUPS.map((group) => (
+            <div
+              key={group.title}
+              className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-white/[0.03]"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xl text-white shadow-md shadow-indigo-500/20 transition group-hover:scale-110">
-                  {card.emoji}
-                </div>
-                {card.comingSoon && <ComingSoonBadge />}
-              </div>
-              <h3 className="mt-5 text-lg font-semibold text-gray-900 dark:text-white">
-                {card.title}
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {group.title}
               </h3>
               <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-slate-400">
-                {card.description}
+                {group.description}
               </p>
-            </Link>
-          ))}
-        </div>
 
-        <div className="mt-16 rounded-2xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-white/[0.03]">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Looking for technical documentation?
-          </h3>
-          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
-            {DOCS_LINKS.map((link) => (
-              <Link
-                key={link.label}
-                href={link.href}
-                className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-              >
-                {link.label} →
-              </Link>
-            ))}
-          </div>
+              <ul className="mt-5 space-y-2.5 border-t border-gray-100 pt-5 dark:border-white/10">
+                {group.links.map((link) => (
+                  <li key={link.label}>
+                    <a
+                      href={link.href}
+                      target={link.external ? "_blank" : undefined}
+                      rel={link.external ? "noopener noreferrer" : undefined}
+                      className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      {link.label} →
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
         <div className="mt-20 rounded-3xl border border-gray-200 bg-gradient-to-br from-indigo-50 via-white to-fuchsia-50 p-10 text-center shadow-sm dark:border-white/10 dark:from-indigo-500/10 dark:via-white/[0.02] dark:to-fuchsia-500/10 dark:shadow-xl">

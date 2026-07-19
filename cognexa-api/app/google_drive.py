@@ -2,17 +2,28 @@ import hashlib
 import io
 import json
 import os
-import re
 from datetime import datetime, timezone
 
-from google.oauth2 import service_account
+import requests
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from sqlalchemy import func
 
+from app.crypto import decrypt_str, encrypt_str
 from app.models import Document
 from app.rag import delete_document_chunks, process_document
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid",
+]
+
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".jpg", ".jpeg", ".png")
 
@@ -27,31 +38,124 @@ GOOGLE_EXPORT_MIME_MAP = {
     "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
 }
 
-FOLDER_URL_PATTERNS = [
-    re.compile(r"/folders/([a-zA-Z0-9_-]+)"),
-    re.compile(r"[?&]id=([a-zA-Z0-9_-]+)"),
-]
+
+def _oauth_client_config():
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+    redirect_uri = os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
+    if not client_id or not client_secret or not redirect_uri:
+        raise RuntimeError(
+            "GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and "
+            "GOOGLE_OAUTH_REDIRECT_URI must all be set."
+        )
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": TOKEN_URI,
+            "redirect_uris": [redirect_uri],
+        }
+    }, redirect_uri
 
 
-def extract_folder_id(url):
-    url = (url or "").strip()
-    for pattern in FOLDER_URL_PATTERNS:
-        match = pattern.search(url)
-        if match:
-            return match.group(1)
-    if re.fullmatch(r"[a-zA-Z0-9_-]+", url):
-        return url
-    return None
+def build_oauth_flow():
+    client_config, redirect_uri = _oauth_client_config()
+    flow = Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=redirect_uri)
+    return flow
 
 
-def build_drive_service(service_account_json, subject_email):
-    """Domain-wide delegation: the service account impersonates subject_email
-    so it can read that specific user's Drive without their own OAuth login."""
-    info = json.loads(service_account_json)
-    credentials = service_account.Credentials.from_service_account_info(
-        info, scopes=SCOPES
-    ).with_subject(subject_email)
-    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+def get_authorization_url(state):
+    flow = build_oauth_flow()
+    url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state=state,
+    )
+    return url
+
+
+def exchange_code_for_credentials(code):
+    flow = build_oauth_flow()
+    flow.fetch_token(code=code)
+    return flow.credentials
+
+
+def fetch_account_email(credentials):
+    response = requests.get(
+        USERINFO_URL,
+        headers={"Authorization": f"Bearer {credentials.token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json().get("email")
+
+
+def encode_connection_tokens(credentials):
+    """Serializes a Credentials object into the encrypted string stored in
+    connection.credential."""
+    payload = {
+        "access_token": credentials.token,
+        "refresh_token": credentials.refresh_token,
+        "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+    }
+    return encrypt_str(json.dumps(payload))
+
+
+def _credentials_from_connection(connection):
+    payload = json.loads(decrypt_str(connection.credential))
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+    expiry = datetime.fromisoformat(payload["expiry"]) if payload.get("expiry") else None
+    return Credentials(
+        token=payload["access_token"],
+        refresh_token=payload.get("refresh_token"),
+        token_uri=TOKEN_URI,
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=SCOPES,
+        expiry=expiry,
+    )
+
+
+def _refresh_if_needed(connection):
+    """Loads the connection's stored OAuth credentials, refreshing them if
+    expired. Returns (credentials, refreshed_credential) where
+    refreshed_credential is the new encrypted token string to persist, or
+    None if nothing changed."""
+    credentials = _credentials_from_connection(connection)
+    original_token = credentials.token
+
+    if not credentials.valid and credentials.refresh_token:
+        credentials.refresh(GoogleAuthRequest())
+
+    refreshed_credential = None
+    if credentials.token != original_token:
+        refreshed_credential = encode_connection_tokens(credentials)
+
+    return credentials, refreshed_credential
+
+
+def build_drive_service_from_connection(connection):
+    """Builds a Drive service from the connection's stored OAuth tokens,
+    refreshing them if expired. Returns (service, refreshed_credential) — see
+    _refresh_if_needed."""
+    credentials, refreshed_credential = _refresh_if_needed(connection)
+    service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    return service, refreshed_credential
+
+
+def get_picker_access_token(connection):
+    """Returns (access_token, expires_in_seconds, refreshed_credential) for
+    handing a short-lived, drive.readonly-scoped token to the browser-side
+    Google Picker widget. refreshed_credential is the new encrypted token
+    string to persist, or None if nothing changed."""
+    credentials, refreshed_credential = _refresh_if_needed(connection)
+    expires_in = 3600
+    if credentials.expiry:
+        expires_in = max(0, int((credentials.expiry - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()))
+    return credentials.token, expires_in, refreshed_credential
 
 
 def _iter_folder_files(service, folder_id, path_prefix=""):
@@ -85,8 +189,32 @@ def iter_my_drive_files(service):
     yield from _iter_folder_files(service, "root")
 
 
-def iter_shared_folder_files(service, folder_id):
-    yield from _iter_folder_files(service, folder_id)
+def iter_shared_with_me_files(service):
+    """Files and folders explicitly shared with the authenticated account
+    (as opposed to files living under their own My Drive root)."""
+    page_token = None
+    while True:
+        response = (
+            service.files()
+            .list(
+                q="sharedWithMe = true and trashed = false",
+                fields="nextPageToken, files(id, name, mimeType)",
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
+
+        for f in response.get("files", []):
+            if f["mimeType"] == FOLDER_MIME:
+                yield from _iter_folder_files(service, f["id"], f"{f['name']}/")
+            else:
+                yield f["id"], f["name"], f["mimeType"], f["name"]
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
 
 
 def download_file_bytes(service, file_id, mime_type, name):
@@ -115,54 +243,49 @@ def download_file_bytes(service, file_id, mime_type, name):
 
 
 def sync_connection(db, connection, extract_text_fn, upload_folder, chunk_size=500, chunk_overlap=0):
-    """Pulls every file reachable from the connection's configured My Drive
-    users and shared folders, ingests any not already imported, and (if
-    sync_deleted is set) removes documents whose source file is gone. Mutates
-    and commits `connection` and any Document rows for connection.user_id."""
+    """Pulls every file reachable from the connection's own OAuth-authenticated
+    Google account (My Drive + anything shared with it), ingests any not
+    already imported, and (if sync_deleted is set) removes documents whose
+    source file is gone. Mutates and commits `connection` and any Document
+    rows for connection.user_id."""
     config = json.loads(connection.config or "{}")
-    admin_email = config.get("primary_admin_email")
-    my_drive_emails = list(
-        dict.fromkeys([admin_email] + (config.get("my_drive_emails") or []))
-    )
-    my_drive_emails = [e for e in my_drive_emails if e]
-    shared_folder_urls = config.get("shared_folder_urls") or []
     sync_deleted = config.get("sync_deleted", True)
+    folders = config.get("folders") or []
 
     errors = []
     remote_files = {}
 
-    def service_for(email):
-        try:
-            return build_drive_service(connection.credential, email)
-        except Exception as exc:
-            errors.append(f"Failed to authenticate as {email}: {exc}")
-            return None
+    try:
+        service, refreshed_credential = build_drive_service_from_connection(connection)
+    except Exception as exc:
+        connection.status = "error"
+        connection.status_message = f"Failed to authenticate: {exc}"
+        connection.last_synced_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"added": 0, "removed": 0, "skipped": 0, "errors": [str(exc)]}
 
-    for email in my_drive_emails:
-        service = service_for(email)
-        if not service:
-            continue
+    if refreshed_credential:
+        connection.credential = refreshed_credential
+
+    if folders:
+        for folder in folders:
+            try:
+                for file_id, name, mime_type, label in _iter_folder_files(service, folder["id"], f"{folder['name']}/"):
+                    remote_files.setdefault(file_id, (name, mime_type, label))
+            except Exception as exc:
+                errors.append(f"Failed to list folder {folder['name']}: {exc}")
+    else:
         try:
             for file_id, name, mime_type, label in iter_my_drive_files(service):
-                remote_files.setdefault(file_id, (name, mime_type, service, label))
+                remote_files.setdefault(file_id, (name, mime_type, label))
         except Exception as exc:
-            errors.append(f"Failed to list {email}'s Drive: {exc}")
+            errors.append(f"Failed to list My Drive: {exc}")
 
-    if shared_folder_urls:
-        service = service_for(admin_email) if admin_email else None
-        for url in shared_folder_urls:
-            folder_id = extract_folder_id(url)
-            if not folder_id:
-                errors.append(f"Couldn't parse a folder ID from: {url}")
-                continue
-            if not service:
-                errors.append(f"No admin account available to read shared folder: {url}")
-                continue
-            try:
-                for file_id, name, mime_type, label in iter_shared_folder_files(service, folder_id):
-                    remote_files.setdefault(file_id, (name, mime_type, service, label))
-            except Exception as exc:
-                errors.append(f"Failed to list shared folder {url}: {exc}")
+        try:
+            for file_id, name, mime_type, label in iter_shared_with_me_files(service):
+                remote_files.setdefault(file_id, (name, mime_type, label))
+        except Exception as exc:
+            errors.append(f"Failed to list files shared with this account: {exc}")
 
     existing_docs = (
         db.query(Document).filter(Document.data_source_id == connection.id).all()
@@ -173,70 +296,79 @@ def sync_connection(db, connection, extract_text_fn, upload_folder, chunk_size=5
     skipped = 0
     visited_ids = set()
 
-    for file_id, (name, mime_type, service, label) in remote_files.items():
+    total = len(remote_files)
+    connection.status = "syncing"
+    connection.status_message = f"Processing 0 of {total} files"
+    db.commit()
+
+    for processed, (file_id, (name, mime_type, label)) in enumerate(remote_files.items(), start=1):
         visited_ids.add(file_id)
-        if file_id in existing_by_external:
-            skipped += 1
-            continue
-
         try:
-            content, filename = download_file_bytes(service, file_id, mime_type, name)
-        except Exception as exc:
-            errors.append(f"Failed to download {label}: {exc}")
-            continue
+            if file_id in existing_by_external:
+                skipped += 1
+                continue
 
-        if content is None:
-            skipped += 1
-            continue
+            try:
+                content, filename = download_file_bytes(service, file_id, mime_type, name)
+            except Exception as exc:
+                errors.append(f"Failed to download {label}: {exc}")
+                continue
 
-        content_hash = hashlib.sha256(content).hexdigest()
-        duplicate = (
-            db.query(Document)
-            .filter(Document.user_id == connection.user_id, Document.content_hash == content_hash)
-            .first()
-        )
-        if duplicate:
-            skipped += 1
-            continue
+            if content is None:
+                skipped += 1
+                continue
 
-        safe_name = f"gdrive_{file_id}_{filename}"
-        file_path = os.path.join(upload_folder, safe_name)
-        with open(file_path, "wb") as f:
-            f.write(content)
+            content_hash = hashlib.sha256(content).hexdigest()
+            duplicate = (
+                db.query(Document)
+                .filter(Document.user_id == connection.user_id, Document.content_hash == content_hash)
+                .first()
+            )
+            if duplicate:
+                skipped += 1
+                continue
 
-        text, file_type, page_count = extract_text_fn(file_path, filename)
-        if file_type is None:
-            os.remove(file_path)
-            skipped += 1
-            continue
+            safe_name = f"gdrive_{file_id}_{filename}"
+            file_path = os.path.join(upload_folder, safe_name)
+            with open(file_path, "wb") as f:
+                f.write(content)
 
-        document = Document(
-            user_id=connection.user_id,
-            filename=filename,
-            file_path=file_path,
-            file_type=file_type,
-            chunks=0,
-            preview=text[:1000] if text.strip() else "Image uploaded (no text detected).",
-            size_bytes=os.path.getsize(file_path),
-            page_count=page_count,
-            content_hash=content_hash,
-            source_type="google_drive",
-            data_source_id=connection.id,
-            external_id=file_id,
-        )
-        db.add(document)
-        db.flush()
+            text, file_type, page_count = extract_text_fn(file_path, filename)
+            if file_type is None:
+                os.remove(file_path)
+                skipped += 1
+                continue
 
-        result = process_document(
-            text,
-            filename,
-            user_id=connection.user_id,
-            document_id=document.id,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-        document.chunks = result["chunks"]
-        added += 1
+            document = Document(
+                user_id=connection.user_id,
+                filename=filename,
+                file_path=file_path,
+                file_type=file_type,
+                chunks=0,
+                preview=text[:1000] if text.strip() else "Image uploaded (no text detected).",
+                size_bytes=os.path.getsize(file_path),
+                page_count=page_count,
+                content_hash=content_hash,
+                source_type="google_drive",
+                data_source_id=connection.id,
+                external_id=file_id,
+            )
+            db.add(document)
+            db.flush()
+
+            result = process_document(
+                text,
+                filename,
+                user_id=connection.user_id,
+                document_id=document.id,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            document.chunks = result["chunks"]
+            added += 1
+        finally:
+            connection.status_message = f"Processing {processed} of {total} files"
+            db.commit()
 
     removed = 0
     if sync_deleted:
@@ -248,9 +380,18 @@ def sync_connection(db, connection, extract_text_fn, upload_folder, chunk_size=5
                 db.delete(document)
                 removed += 1
 
+    connection.synced_size_bytes = (
+        db.query(func.sum(Document.size_bytes))
+        .filter(Document.data_source_id == connection.id)
+        .scalar()
+        or 0
+    )
+
     connection.last_synced_at = datetime.now(timezone.utc)
     connection.status = "error" if errors and added == 0 and skipped == 0 and removed == 0 else "connected"
     summary = f"{added} added, {removed} removed, {skipped} skipped"
+    if not folders:
+        summary = f"Syncing entire Drive — {summary}"
     if errors:
         summary += f" — {len(errors)} error(s)"
     connection.status_message = summary

@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 app/uploads/
 app/vector_db/
+.env.example

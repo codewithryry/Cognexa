@@ -7,14 +7,17 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 import os
+from jose import JWTError, jwt
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    ALGORITHM,
+    SECRET_KEY,
     create_access_token,
     get_current_user,
     hash_password,
@@ -32,6 +35,13 @@ from app.models import (
     Settings,
     User,
 )
+from app.google_drive import (
+    encode_connection_tokens,
+    exchange_code_for_credentials,
+    fetch_account_email,
+    get_authorization_url,
+    get_picker_access_token,
+)
 from app.google_drive import sync_connection as sync_google_drive_connection
 from app.rag import delete_document_chunks, delete_user_collection, process_document
 from app.query import generate_answer_stream, generate_report
@@ -44,10 +54,13 @@ from app.schemas import (
     ChatSessionRenameIn,
     DataSourceConnectionIn,
     DataSourceConnectionOut,
-    DataSourceSyncOut,
+    DataSourceSyncStartedOut,
     DbStatusOut,
     DocumentOut,
     GeneratedReportOut,
+    GoogleDriveAuthorizeOut,
+    GoogleDriveFoldersIn,
+    GoogleDrivePickerTokenOut,
     IntegrationIn,
     IntegrationOut,
     PlanOut,
@@ -262,6 +275,29 @@ def index_document_job(document_id, text, filename, user_id, chunk_size, chunk_o
         document = db.query(Document).filter(Document.id == document_id).first()
         if document:
             document.chunks = result["chunks"]
+            db.commit()
+    finally:
+        db.close()
+
+
+def sync_google_drive_connection_job(connection_id, upload_folder, chunk_size, chunk_overlap):
+    db = SessionLocal()
+    try:
+        connection = db.query(DataSourceConnection).filter(DataSourceConnection.id == connection_id).first()
+        if not connection:
+            return
+        try:
+            sync_google_drive_connection(
+                db,
+                connection,
+                extract_document_text,
+                upload_folder,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+        except Exception as exc:
+            connection.status = "error"
+            connection.status_message = f"Sync failed: {exc}"
             db.commit()
     finally:
         db.close()
@@ -1463,6 +1499,7 @@ def data_source_to_out(connection: DataSourceConnection) -> dict:
         "status": connection.status,
         "status_message": connection.status_message,
         "last_synced_at": connection.last_synced_at,
+        "synced_size_bytes": connection.synced_size_bytes or 0,
         # Never echo the credential (service account key) back to the client.
         "config": json.loads(connection.config) if connection.config else None,
         "created_at": connection.created_at,
@@ -1483,12 +1520,7 @@ def list_data_sources(
     return [data_source_to_out(c) for c in connections]
 
 
-@app.post("/data-sources", response_model=DataSourceConnectionOut)
-def create_data_source(
-    connection_in: DataSourceConnectionIn,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
+def _ensure_can_add_data_source(db: Session, current_user: User):
     plan = current_user.plan or "community"
     limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["community"])
     max_apps = limits["max_apps"]
@@ -1507,41 +1539,106 @@ def create_data_source(
             ),
         )
 
-    config_json = None
-    status = None
 
+GOOGLE_DRIVE_OAUTH_STATE_PURPOSE = "gdrive_oauth"
+GOOGLE_DRIVE_OAUTH_STATE_MINUTES = 10
+
+
+@app.get("/data-sources/google-drive/authorize", response_model=GoogleDriveAuthorizeOut)
+def authorize_google_drive(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_can_add_data_source(db, current_user)
+
+    expire = datetime.now(timezone.utc) + timedelta(minutes=GOOGLE_DRIVE_OAUTH_STATE_MINUTES)
+    state = jwt.encode(
+        {"sub": str(current_user.id), "purpose": GOOGLE_DRIVE_OAUTH_STATE_PURPOSE, "exp": expire},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+    try:
+        url = get_authorization_url(state)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"url": url}
+
+
+@app.get("/data-sources/google-drive/callback")
+def google_drive_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+):
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    redirect_target = f"{frontend_url}/settings/data-sources"
+
+    if error:
+        return RedirectResponse(f"{redirect_target}?error={error}")
+    if not code or not state:
+        return RedirectResponse(f"{redirect_target}?error=missing_code_or_state")
+
+    try:
+        payload = jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") != GOOGLE_DRIVE_OAUTH_STATE_PURPOSE:
+            raise JWTError("wrong purpose")
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return RedirectResponse(f"{redirect_target}?error=invalid_or_expired_state")
+
+    current_user = db.query(User).filter(User.id == user_id).first()
+    if not current_user:
+        return RedirectResponse(f"{redirect_target}?error=user_not_found")
+
+    try:
+        _ensure_can_add_data_source(db, current_user)
+    except HTTPException as exc:
+        return RedirectResponse(f"{redirect_target}?error={exc.detail}")
+
+    try:
+        credentials = exchange_code_for_credentials(code)
+        account_email = fetch_account_email(credentials)
+        encrypted_tokens = encode_connection_tokens(credentials)
+    except Exception as exc:
+        return RedirectResponse(f"{redirect_target}?error=google_auth_failed")
+
+    connection = DataSourceConnection(
+        user_id=current_user.id,
+        source_name="Google Drive",
+        credential=encrypted_tokens,
+        config=json.dumps({"sync_deleted": True, "account_email": account_email}),
+        status="connected",
+        status_message=f"Connected as {account_email}" if account_email else "Connected",
+    )
+    db.add(connection)
+    db.commit()
+
+    return RedirectResponse(f"{redirect_target}?connected=1")
+
+
+@app.post("/data-sources", response_model=DataSourceConnectionOut)
+def create_data_source(
+    connection_in: DataSourceConnectionIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     if connection_in.source_name == "Google Drive":
-        if not connection_in.credential:
-            raise HTTPException(
-                status_code=400,
-                detail="A service account OAuth Token JSON file is required for Google Drive.",
-            )
-        if not connection_in.config:
-            raise HTTPException(
-                status_code=400,
-                detail="Name and Primary Admin Email are required for Google Drive.",
-            )
-        try:
-            parsed_credential = json.loads(connection_in.credential)
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=400,
-                detail="The OAuth Token JSON file isn't valid JSON.",
-            )
-        if parsed_credential.get("type") != "service_account":
-            raise HTTPException(
-                status_code=400,
-                detail="That doesn't look like a Google service account key (missing type=service_account).",
-            )
-        config_json = json.dumps(connection_in.config.model_dump())
-        status = "connected"
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive connections are created via GET /data-sources/google-drive/authorize.",
+        )
+
+    _ensure_can_add_data_source(db, current_user)
 
     connection = DataSourceConnection(
         user_id=current_user.id,
         source_name=connection_in.source_name,
         credential=connection_in.credential or None,
-        config=config_json,
-        status=status,
+        config=json.dumps(connection_in.config.model_dump()) if connection_in.config else None,
+        status=None,
     )
     db.add(connection)
     db.commit()
@@ -1577,7 +1674,7 @@ def delete_data_source(
     return {"deleted": connection_id}
 
 
-@app.post("/data-sources/{connection_id}/sync", response_model=DataSourceSyncOut)
+@app.post("/data-sources/{connection_id}/sync", response_model=DataSourceSyncStartedOut)
 def sync_data_source(
     connection_id: int,
     current_user: User = Depends(get_current_user),
@@ -1594,6 +1691,9 @@ def sync_data_source(
     if connection.source_name != "Google Drive":
         raise HTTPException(status_code=400, detail="Syncing isn't supported for this data source yet.")
 
+    if connection.status == "syncing":
+        raise HTTPException(status_code=409, detail="A sync is already in progress for this connection.")
+
     plan = current_user.plan or "community"
     limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["community"])
     document_count, storage_bytes = get_plan_usage(db, current_user.id)
@@ -1608,22 +1708,71 @@ def sync_data_source(
 
     settings = get_or_create_settings(db, current_user.id)
 
-    try:
-        result = sync_google_drive_connection(
-            db,
-            connection,
-            extract_document_text,
-            UPLOAD_FOLDER,
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-        )
-    except Exception as exc:
-        connection.status = "error"
-        connection.status_message = f"Sync failed: {exc}"
-        db.commit()
-        raise HTTPException(status_code=502, detail=f"Google Drive sync failed: {exc}")
+    connection.status = "syncing"
+    connection.status_message = "Starting sync..."
+    db.commit()
 
-    return result
+    INDEX_POOL.submit(
+        plan_priority(plan),
+        sync_google_drive_connection_job,
+        connection.id,
+        UPLOAD_FOLDER,
+        settings.chunk_size,
+        settings.chunk_overlap,
+    )
+
+    return {"started": True, "status": "syncing"}
+
+
+def _get_google_drive_connection(connection_id: int, current_user: User, db: Session) -> DataSourceConnection:
+    connection = (
+        db.query(DataSourceConnection)
+        .filter(DataSourceConnection.id == connection_id, DataSourceConnection.user_id == current_user.id)
+        .first()
+    )
+    if not connection:
+        raise HTTPException(status_code=404, detail="Data source connection not found")
+    if connection.source_name != "Google Drive":
+        raise HTTPException(status_code=400, detail="This action is only supported for Google Drive.")
+    return connection
+
+
+@app.get("/data-sources/{connection_id}/google-drive/picker-token", response_model=GoogleDrivePickerTokenOut)
+def get_google_drive_picker_token(
+    connection_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    connection = _get_google_drive_connection(connection_id, current_user, db)
+
+    try:
+        access_token, expires_in, refreshed_credential = get_picker_access_token(connection)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to get a Google Drive access token: {exc}")
+
+    if refreshed_credential:
+        connection.credential = refreshed_credential
+        db.commit()
+
+    return {"access_token": access_token, "expires_in": expires_in}
+
+
+@app.patch("/data-sources/{connection_id}/google-drive/folders", response_model=DataSourceConnectionOut)
+def update_google_drive_folders(
+    connection_id: int,
+    folders_in: GoogleDriveFoldersIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    connection = _get_google_drive_connection(connection_id, current_user, db)
+
+    config = json.loads(connection.config or "{}")
+    config["folders"] = [f.model_dump() for f in folders_in.folders]
+    connection.config = json.dumps(config)
+    db.commit()
+    db.refresh(connection)
+
+    return data_source_to_out(connection)
 
 
 def chat_channel_to_out(channel: ChatChannel) -> dict:
@@ -1938,6 +2087,7 @@ def delete_account(
     db.query(ChatSession).filter(ChatSession.user_id == current_user.id).delete()
     db.query(Integration).filter(Integration.user_id == current_user.id).delete()
     db.query(Settings).filter(Settings.user_id == current_user.id).delete()
+    db.query(DataSourceConnection).filter(DataSourceConnection.user_id == current_user.id).delete()
 
     db.delete(current_user)
     db.commit()
