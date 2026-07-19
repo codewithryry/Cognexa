@@ -104,11 +104,13 @@ const menuGroups = [
 ];
 
 const STORAGE_KEY = "cognexa_sidebar_collapsed";
+const CHAT_EXPANDED_KEY = "cognexa_sidebar_chat_expanded";
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(true);
   const [sessions, setSessions] = useState<ChatSessionPayload[]>([]);
   const [creatingChat, setCreatingChat] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -116,7 +118,18 @@ export default function Sidebar() {
 
   useEffect(() => {
     if (localStorage.getItem(STORAGE_KEY) === "1") setCollapsed(true);
+    if (localStorage.getItem(CHAT_EXPANDED_KEY) === "0") setChatExpanded(false);
   }, []);
+
+  function toggleChatExpanded(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setChatExpanded((prev) => {
+      const next = !prev;
+      localStorage.setItem(CHAT_EXPANDED_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   useEffect(() => {
     function refresh() {
@@ -271,10 +284,30 @@ export default function Sidebar() {
                 >
                   {item.icon}
                 </svg>
-                {!collapsed && item.name}
+                {!collapsed && <span className="flex-1">{item.name}</span>}
+                {isChat && !collapsed && (
+                  <button
+                    onClick={toggleChatExpanded}
+                    title={chatExpanded ? "Collapse recent chats" : "Expand recent chats"}
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition ${
+                      active ? "text-white/80 hover:text-white" : "text-gray-400 hover:text-gray-900 dark:text-slate-500 dark:hover:text-white"
+                    }`}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                      className={`h-3.5 w-3.5 shrink-0 transition-transform ${chatExpanded ? "rotate-180" : ""}`}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                )}
               </Link>
 
-              {isChat && active && !collapsed && (
+              {isChat && chatExpanded && !collapsed && (
                 <div className="mt-1 space-y-0.5 border-l border-gray-200 dark:border-white/5 pl-3 ml-4">
                   <button
                     onClick={handleNewChat}

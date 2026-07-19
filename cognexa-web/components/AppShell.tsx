@@ -9,7 +9,18 @@ import DialogProvider from "@/lib/DialogContext";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAuthPage = pathname === "/login" || pathname === "/";
+  const isAuthPage =
+    pathname === "/login" ||
+    pathname === "/" ||
+    pathname === "/contact" ||
+    pathname === "/solutions" ||
+    pathname.startsWith("/solutions/") ||
+    pathname === "/resources" ||
+    pathname.startsWith("/resources/") ||
+    pathname === "/community" ||
+    pathname.startsWith("/community/") ||
+    pathname === "/docs" ||
+    pathname.startsWith("/docs/");
 
   if (isAuthPage) {
     return (

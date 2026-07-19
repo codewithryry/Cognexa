@@ -61,8 +61,11 @@ export default function NotificationsMenu() {
   return (
     <div className="relative" ref={ref}>
       <button
+        type="button"
         onClick={handleToggle}
-        className="relative rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 text-gray-500 dark:text-gray-400 shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+        aria-label="Open notifications"
+        title="Notifications"
+        className="relative flex h-9 w-9 items-center justify-center text-gray-500 transition hover:text-gray-900 dark:text-slate-400 dark:hover:text-white"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -79,7 +82,7 @@ export default function NotificationsMenu() {
           />
         </svg>
         {notifications.length > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-fuchsia-500 ring-2 ring-white dark:ring-gray-900" />
+          <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-fuchsia-500 ring-2 ring-white dark:ring-gray-950" />
         )}
       </button>
 

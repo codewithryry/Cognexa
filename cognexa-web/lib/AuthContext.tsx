@@ -28,9 +28,17 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-const PUBLIC_ROUTES = ["/login", "/"];
+const PUBLIC_EXACT_ROUTES = ["/", "/login", "/contact"];
+const PUBLIC_ROUTE_PREFIXES = ["/docs", "/solutions", "/resources", "/community"];
 const IDLE_LIMIT_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVITY_EVENTS = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+
+function isPublicRoute(pathname: string) {
+  return (
+    PUBLIC_EXACT_ROUTES.includes(pathname) ||
+    PUBLIC_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+  );
+}
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -55,7 +63,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   }
 
   useEffect(() => {
-    const isPublic = PUBLIC_ROUTES.includes(pathname);
+    const isPublic = isPublicRoute(pathname);
     const token = getToken();
 
     if (!token) {

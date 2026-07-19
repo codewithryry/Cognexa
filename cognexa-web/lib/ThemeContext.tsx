@@ -38,8 +38,13 @@ function persistThemeToBackend(theme: Theme) {
     .catch(() => {});
 }
 
+function initialTheme(): Theme {
+  if (typeof document === "undefined") return "dark";
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
+
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("dark");
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     // localStorage is the source of truth for this device — the user's last
