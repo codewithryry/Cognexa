@@ -128,7 +128,10 @@ def extract_document_text(file_path, filename):
 
 logger = logging.getLogger("uvicorn.error")
 
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception:
+    logger.exception("Base.metadata.create_all failed; continuing startup")
 
 
 def ensure_chat_message_session_column():
