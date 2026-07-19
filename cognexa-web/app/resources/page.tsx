@@ -1,67 +1,104 @@
 "use client";
 
 import Link from "next/link";
-import MarketingNav from "@/components/MarketingNav";
-import ComingSoonBadge from "@/components/ComingSoonBadge";
+import { useAuth } from "@/lib/AuthContext";
+import GithubStars from "@/components/GithubStars";
+import { REPO_URL } from "@/components/DocsLayout";
 
-const RESOURCE_CARDS = [
+const RESOURCE_GROUPS = [
   {
-    title: "Basics",
-    description: "A beginner-friendly hub for what Cognexa is and how it works.",
-    href: "/resources/basics",
-    emoji: "🌱",
-    comingSoon: false,
+    title: "Documentation",
+    description: "Quickstarts and guides for using and administering Cognexa.",
+    links: [
+      { label: "Quickstart", href: "/docs" },
+      { label: "User guides", href: "/docs/user-guides" },
+      { label: "Administrator guides", href: "/docs/admin-guides" },
+      { label: "Developer guides", href: "/docs/developer-guides" },
+      { label: "References", href: "/docs/references" },
+      { label: "FAQs", href: "/docs/faqs" },
+    ],
   },
   {
-    title: "Blog",
-    description: "Product updates, engineering deep dives, and customer stories.",
-    href: "/resources/blog",
-    emoji: "✍️",
-    comingSoon: true,
+    title: "Releases & Source",
+    description: "Track what shipped, or read the code directly.",
+    links: [
+      { label: "Release notes", href: "/docs/releases" },
+      { label: "GitHub repository", href: REPO_URL, external: true },
+      { label: "Issues & feature requests", href: `${REPO_URL}/issues`, external: true },
+    ],
   },
   {
-    title: "Changelog",
-    description: "Version history and release notes, pulled live from GitHub.",
-    href: "/docs/releases",
-    emoji: "📋",
-    comingSoon: false,
+    title: "Get in touch",
+    description: "Talk to the team about plans, self-hosting, or a demo.",
+    links: [
+      { label: "Contact us", href: "/contact" },
+      { label: "Community", href: "/community" },
+    ],
   },
-  {
-    title: "Roadmap",
-    description: "What's planned, in progress, and recently shipped.",
-    href: "/resources/roadmap",
-    emoji: "🗺️",
-    comingSoon: true,
-  },
-  {
-    title: "Status",
-    description: "Live status for hosted services.",
-    href: "/resources/status",
-    emoji: "🟢",
-    comingSoon: true,
-  },
-  {
-    title: "Contact Support",
-    description: "Support channels and a direct line to the team.",
-    href: "/resources/contact-support",
-    emoji: "🎧",
-    comingSoon: false,
-  },
-];
-
-const DOCS_LINKS = [
-  { label: "Quickstart", href: "/docs" },
-  { label: "User guides", href: "/docs/user-guides" },
-  { label: "Administrator guides", href: "/docs/admin-guides" },
-  { label: "Developer guides", href: "/docs/developer-guides" },
-  { label: "References", href: "/docs/references" },
-  { label: "FAQs", href: "/docs/faqs" },
 ];
 
 export default function Resources() {
+  const { user } = useAuth();
+
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f7f7fb] text-gray-900 dark:bg-[#0b0b14] dark:text-white">
-      <MarketingNav />
+      <nav className="sticky top-0 z-20 border-b border-gray-200/70 bg-white/70 backdrop-blur-md dark:border-white/5 dark:bg-[#0b0b14]/80">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-8">
+            <Link href="/" className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-sm font-bold text-white">
+                C
+              </span>
+              <span className="text-lg font-semibold">Cognexa</span>
+            </Link>
+
+            <div className="hidden items-center gap-6 text-sm font-medium text-gray-600 dark:text-slate-400 lg:flex">
+              <Link href="/docs" className="transition hover:text-gray-900 dark:hover:text-white">
+                Docs
+              </Link>
+              <Link href="/solutions" className="transition hover:text-gray-900 dark:hover:text-white">
+                Solutions
+              </Link>
+              <Link href="/resources" className="text-gray-900 transition dark:text-white">
+                Resources
+              </Link>
+              <Link href="/community" className="transition hover:text-gray-900 dark:hover:text-white">
+                Community
+              </Link>
+              <Link href="/#pricing" className="transition hover:text-gray-900 dark:hover:text-white">
+                Pricing
+              </Link>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <GithubStars />
+
+            <Link
+              href="/contact"
+              className="hidden text-sm font-medium text-gray-600 transition hover:text-gray-900 sm:inline dark:text-slate-400 dark:hover:text-white"
+            >
+              Contact us
+            </Link>
+
+            {user ? (
+              <Link
+                href="/dashboard"
+                className="rounded-lg bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-indigo-500/20 transition hover:shadow-lg"
+              >
+                Go to Dashboard
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="rounded-lg bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-indigo-500/20 transition hover:shadow-lg"
+              >
+                Sign In
+              </Link>
+            )}
+          </div>
+        </div>
+      </nav>
 
       <div className="mx-auto max-w-6xl px-6 py-16">
         <div className="mx-auto max-w-2xl text-center">

@@ -28,25 +28,24 @@ const SOLUTIONS_LINKS = [
   { label: "Knowledge Intelligence", href: "/solutions/knowledge-intelligence" },
   { label: "Document Analysis", href: "/solutions/document-analysis" },
   { label: "AI Research", href: "/solutions/ai-research" },
-  { label: "AI Customer Support", href: "/solutions/ai-customer-support" },
+  { label: "AI Customer Support", href: "/solutions/ai-customer-support", comingSoon: true },
 ];
 
 const RESOURCES_LINKS = [
   { label: "Basics", href: "/resources/basics" },
-  { label: "Blog", href: "/resources/blog", comingSoon: true },
   { label: "Changelog", href: "/docs/releases" },
+    { label: "Contact Support", href: "/resources/contact-support" },
+    { label: "Blog", href: "/resources/blog", comingSoon: true },
   { label: "Roadmap", href: "/resources/roadmap", comingSoon: true },
   { label: "Status", href: "/resources/status", comingSoon: true },
-  { label: "Contact Support", href: "/resources/contact-support" },
 ];
 
 const COMMUNITY_LINKS = [
   { label: "GitHub", href: REPO_URL, external: true },
+    { label: "Report a Bug", href: "/community/report-bug" },
   { label: "Discord", href: "/community/discord", comingSoon: true },
   { label: "Discussions", href: "/community/discussions", comingSoon: true },
   { label: "Feature Requests", href: "/community/feature-requests", comingSoon: true },
-  { label: "Report a Bug", href: "/community/report-bug" },
-  { label: "YouTube", href: "/community/youtube", comingSoon: true },
 ];
 
 function NavDropdown({
@@ -148,7 +147,7 @@ export default function MarketingNav() {
               href="/dashboard"
               className="rounded-lg bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-indigo-500/20 transition hover:shadow-lg"
             >
-              Go to Home
+              Go to Dashboard
             </Link>
           ) : (
             <Link

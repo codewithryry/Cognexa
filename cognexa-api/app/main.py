@@ -2083,11 +2083,14 @@ def delete_account(
 
     delete_user_collection(current_user.id)
 
+    db.query(GeneratedReport).filter(GeneratedReport.user_id == current_user.id).delete()
     db.query(ChatMessage).filter(ChatMessage.user_id == current_user.id).delete()
     db.query(ChatSession).filter(ChatSession.user_id == current_user.id).delete()
     db.query(Integration).filter(Integration.user_id == current_user.id).delete()
     db.query(Settings).filter(Settings.user_id == current_user.id).delete()
     db.query(DataSourceConnection).filter(DataSourceConnection.user_id == current_user.id).delete()
+    db.query(ChatChannel).filter(ChatChannel.user_id == current_user.id).delete()
+    db.execute(text("DELETE FROM activity_log WHERE user_id = :user_id"), {"user_id": current_user.id})
 
     db.delete(current_user)
     db.commit()

@@ -112,7 +112,7 @@ export default function SolutionPage() {
                   href={user ? "/dashboard" : "/login"}
                   className="inline-block rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:-translate-y-0.5 hover:shadow-xl"
                 >
-                  {user ? "Go to Home →" : "Get Started →"}
+                  {user ? "Go to Dashboard →" : "Get Started →"}
                 </Link>
               </div>
             </>

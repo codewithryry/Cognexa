@@ -106,7 +106,7 @@ export const SOLUTIONS: Solution[] = [
     slug: "ai-customer-support",
     title: "AI Customer Support",
     tagline: "A support assistant trained on your own docs, ready to answer customers directly.",
-    comingSoon: true,
+    comingSoon: false,
     overview:
       "We're extending Cognexa's retrieval-augmented core into a customer-facing assistant — one that answers directly from your product docs and support content, with the same grounding guarantees your internal team already relies on.",
     benefits: [

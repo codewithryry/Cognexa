@@ -27,26 +27,23 @@ const SOLUTIONS_LINKS = [
   { label: "Knowledge Intelligence", href: "/solutions/knowledge-intelligence" },
   { label: "Document Analysis", href: "/solutions/document-analysis" },
   { label: "AI Research", href: "/solutions/ai-research" },
-  { label: "AI Customer Support", href: "/solutions/ai-customer-support" },
+  { label: "AI Customer Support", href: "/solutions/ai-customer-support", comingSoon: true },
 ];
 
 const RESOURCES_LINKS = [
   { label: "Basics", href: "/resources/basics" },
-  { label: "Blog", href: "/resources/blog", comingSoon: true },
   { label: "Changelog", href: "/docs/releases" },
+    { label: "Contact Support", href: "/resources/contact-support" },
+    { label: "Blog", href: "/resources/blog", comingSoon: true },
   { label: "Roadmap", href: "/resources/roadmap", comingSoon: true },
   { label: "Status", href: "/resources/status", comingSoon: true },
-  { label: "Contact Support", href: "/resources/contact-support" },
 ];
 
 const COMMUNITY_LINKS = [
   { label: "GitHub", href: REPO_URL, external: true },
-  { label: "Discord", href: "/community/discord", comingSoon: true },
-  { label: "Discussions", href: "/community/discussions", comingSoon: true },
-  { label: "Feature Requests", href: "/community/feature-requests", comingSoon: true },
   { label: "Report a Bug", href: "/community/report-bug" },
-  { label: "YouTube", href: "/community/youtube", comingSoon: true },
 ];
+
 
 function NavDropdown({
   label,
