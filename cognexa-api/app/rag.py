@@ -13,9 +13,16 @@ client = chromadb.PersistentClient(
 )
 
 
-model = SentenceTransformer(
-    "all-MiniLM-L6-v2"
-)
+_model = None
+
+
+def get_embedding_model():
+    """Loaded lazily (not at import) so the server can bind its port and pass
+    Render's health check before paying the torch/model-load memory cost."""
+    global _model
+    if _model is None:
+        _model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _model
 
 
 def user_collection_name(user_id):
@@ -52,7 +59,7 @@ def process_document(text, filename, user_id, document_id, chunk_size=500, chunk
     if not chunks:
         return {"chunks": 0}
 
-    embeddings = model.encode(chunks).tolist()
+    embeddings = get_embedding_model().encode(chunks).tolist()
 
 
     ids = [

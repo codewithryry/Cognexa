@@ -4,7 +4,7 @@ import httpx
 import requests
 import ollama
 
-from app.rag import get_user_collection, model
+from app.rag import get_embedding_model, get_user_collection
 
 
 # Well-known, publicly documented API base URLs for each provider's own
@@ -247,7 +247,7 @@ def search_document(question, user_id, document_ids=None, limit=8, pool_size=24,
 
     collection = get_user_collection(user_id)
 
-    query_embedding = model.encode(
+    query_embedding = get_embedding_model().encode(
         [question]
     ).tolist()
 
