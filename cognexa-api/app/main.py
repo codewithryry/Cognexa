@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import logging
 import re
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -125,6 +126,8 @@ def extract_document_text(file_path, filename):
     return text, file_type, page_count
 
 
+logger = logging.getLogger("uvicorn.error")
+
 Base.metadata.create_all(bind=engine)
 
 
@@ -146,7 +149,10 @@ def ensure_chat_message_session_column():
         conn.commit()
 
 
-ensure_chat_message_session_column()
+try:
+    ensure_chat_message_session_column()
+except Exception:
+    logger.exception("ensure_chat_message_session_column failed; continuing startup")
 
 
 def ensure_data_source_connection_columns():
@@ -174,7 +180,10 @@ def ensure_data_source_connection_columns():
         conn.commit()
 
 
-ensure_data_source_connection_columns()
+try:
+    ensure_data_source_connection_columns()
+except Exception:
+    logger.exception("ensure_data_source_connection_columns failed; continuing startup")
 
 
 def ensure_document_source_columns():
@@ -195,7 +204,10 @@ def ensure_document_source_columns():
         conn.commit()
 
 
-ensure_document_source_columns()
+try:
+    ensure_document_source_columns()
+except Exception:
+    logger.exception("ensure_document_source_columns failed; continuing startup")
 
 
 def migrate_orphan_chat_messages():
@@ -233,7 +245,10 @@ def migrate_orphan_chat_messages():
         db.close()
 
 
-migrate_orphan_chat_messages()
+try:
+    migrate_orphan_chat_messages()
+except Exception:
+    logger.exception("migrate_orphan_chat_messages failed; continuing startup")
 
 app = FastAPI(
     title="Cognexa API",
