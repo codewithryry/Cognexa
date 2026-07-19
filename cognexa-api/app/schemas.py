@@ -144,6 +144,7 @@ class ChatChannelOut(BaseModel):
     id: int
     channel_name: str
     connected: bool
+    bot_username: str | None = None
     created_at: datetime | None = None
 
     class Config:

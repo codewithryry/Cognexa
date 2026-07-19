@@ -5,8 +5,9 @@ import logging
 import re
 import zipfile
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile, File, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile, File, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 import os
@@ -34,7 +35,17 @@ from app.models import (
     GeneratedReport,
     Integration,
     Settings,
+    TelegramChatLink,
     User,
+)
+from app.crypto import decrypt_str, encrypt_str
+from app.telegram import (
+    generate_webhook_secret,
+    handle_telegram_update,
+    telegram_delete_webhook,
+    telegram_get_me,
+    telegram_get_webhook_info,
+    telegram_set_webhook,
 )
 from app.google_drive import (
     encode_connection_tokens,
@@ -211,6 +222,36 @@ try:
     ensure_document_source_columns()
 except Exception:
     logger.exception("ensure_document_source_columns failed; continuing startup")
+
+
+def ensure_chat_channel_columns():
+    """chat_channels predates bot_username/webhook_secret/updated_at (added for
+    the Telegram bot connector) -- add them by hand if missing, same pattern
+    as ensure_data_source_connection_columns above. Also widen bot_token to
+    TEXT since it now stores an encrypted (longer) value instead of the raw
+    token."""
+    inspector = inspect(engine)
+    existing_columns = {col["name"]: col for col in inspector.get_columns("chat_channels")}
+    columns = set(existing_columns)
+    bot_token_col = existing_columns.get("bot_token")
+
+    with engine.connect() as conn:
+        if bot_token_col is not None and "TEXT" not in str(bot_token_col["type"]).upper():
+            conn.execute(text("ALTER TABLE chat_channels MODIFY bot_token TEXT NULL"))
+        if "bot_username" not in columns:
+            conn.execute(text("ALTER TABLE chat_channels ADD COLUMN bot_username VARCHAR(150) NULL"))
+        if "webhook_secret" not in columns:
+            conn.execute(text("ALTER TABLE chat_channels ADD COLUMN webhook_secret VARCHAR(64) NULL"))
+            conn.execute(text("ALTER TABLE chat_channels ADD UNIQUE INDEX ix_chat_channels_webhook_secret (webhook_secret)"))
+        if "updated_at" not in columns:
+            conn.execute(text("ALTER TABLE chat_channels ADD COLUMN updated_at TIMESTAMP NULL"))
+        conn.commit()
+
+
+try:
+    ensure_chat_channel_columns()
+except Exception:
+    logger.exception("ensure_chat_channel_columns failed; continuing startup")
 
 
 def migrate_orphan_chat_messages():
@@ -1822,6 +1863,7 @@ def chat_channel_to_out(channel: ChatChannel) -> dict:
         "id": channel.id,
         "channel_name": channel.channel_name,
         "connected": bool(channel.bot_token),
+        "bot_username": channel.bot_username,
         "created_at": channel.created_at,
     }
 
@@ -1865,13 +1907,119 @@ def create_chat_channel(
     channel = ChatChannel(
         user_id=current_user.id,
         channel_name=channel_in.channel_name,
-        bot_token=channel_in.bot_token or None,
     )
+
+    if channel_in.channel_name.strip().lower() == "telegram" and channel_in.bot_token:
+        raw_token = channel_in.bot_token.strip()
+        try:
+            bot_info = telegram_get_me(raw_token)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        # request.base_url can't be trusted here -- behind Render's proxy it
+        # reflects the app's own internal address (seen in practice as a
+        # non-public port, and even as a loopback IP Telegram rejects
+        # outright), not the bot's actual public URL. Require it explicitly
+        # instead of guessing wrong in a way that only surfaces as a cryptic
+        # Telegram API error.
+        base_url = os.getenv("API_PUBLIC_URL")
+        if not base_url:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "API_PUBLIC_URL is not set on the backend. Set it to this API's public "
+                    "HTTPS URL (e.g. https://cognexa-api.onrender.com) in Render's environment "
+                    "variables, then try connecting Telegram again."
+                ),
+            )
+
+        parsed = urlsplit(base_url.rstrip("/"))
+        is_local = parsed.hostname in ("127.0.0.1", "localhost", "::1")
+        if not parsed.hostname or (parsed.scheme != "https" and not is_local):
+            raise HTTPException(
+                status_code=500,
+                detail="API_PUBLIC_URL must be a full https:// URL, e.g. https://cognexa-api.onrender.com",
+            )
+
+        webhook_secret = generate_webhook_secret()
+
+        if is_local:
+            # Telegram's servers can never reach 127.0.0.1/localhost, no
+            # matter what URL we hand them -- registering a real webhook
+            # here would just fail (or silently go nowhere). Save the
+            # channel locally without calling Telegram's API, so the rest of
+            # the connect flow (token storage, DB rows, UI) is still
+            # testable in local dev; use a public HTTPS tunnel (e.g. ngrok)
+            # pointed at API_PUBLIC_URL for an actually-working bot locally.
+            pass
+        else:
+            # Telegram only accepts a webhook on 443/80/88/8443 (or no
+            # explicit port, i.e. the scheme's default) -- drop any other
+            # port rather than send a URL Telegram will reject.
+            netloc = parsed.hostname if parsed.port not in (None, 443, 80, 88, 8443) else parsed.netloc
+            webhook_url = f"https://{netloc}/channels/telegram/webhook/{webhook_secret}"
+            try:
+                telegram_set_webhook(raw_token, webhook_url, webhook_secret)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        channel.bot_token = encrypt_str(raw_token)
+        channel.bot_username = bot_info.get("username")
+        channel.webhook_secret = webhook_secret
+    elif channel_in.bot_token:
+        channel.bot_token = encrypt_str(channel_in.bot_token.strip())
+
     db.add(channel)
     db.commit()
     db.refresh(channel)
 
     return chat_channel_to_out(channel)
+
+
+@app.get("/chat-channels/{channel_id}/telegram/test")
+def test_telegram_channel(
+    channel_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    channel = (
+        db.query(ChatChannel)
+        .filter(ChatChannel.id == channel_id, ChatChannel.user_id == current_user.id)
+        .first()
+    )
+    if not channel:
+        raise HTTPException(status_code=404, detail="Chat channel not found")
+    if channel.channel_name.strip().lower() != "telegram" or not channel.bot_token:
+        raise HTTPException(status_code=400, detail="This channel isn't a connected Telegram bot.")
+
+    try:
+        info = telegram_get_webhook_info(decrypt_str(channel.bot_token))
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    expected_url = (
+        f"/channels/telegram/webhook/{channel.webhook_secret}" if channel.webhook_secret else None
+    )
+    webhook_registered = bool(info.get("url"))
+    webhook_matches = bool(expected_url) and info.get("url", "").endswith(expected_url)
+
+    if not webhook_registered:
+        status_message = "No webhook is registered with Telegram for this bot."
+    elif not webhook_matches:
+        status_message = "A webhook is registered, but it doesn't point at this backend."
+    elif info.get("last_error_message"):
+        status_message = f"Telegram couldn't deliver the last update: {info['last_error_message']}"
+    else:
+        status_message = "Webhook is registered and healthy."
+
+    return {
+        "ok": webhook_registered and webhook_matches and not info.get("last_error_message"),
+        "status_message": status_message,
+        "webhook_url": info.get("url") or None,
+        "pending_update_count": info.get("pending_update_count", 0),
+        "last_error_message": info.get("last_error_message"),
+        "last_error_date": info.get("last_error_date"),
+    }
 
 
 @app.delete("/chat-channels/{channel_id}")
@@ -1888,10 +2036,44 @@ def delete_chat_channel(
     if not channel:
         raise HTTPException(status_code=404, detail="Chat channel not found")
 
+    if channel.webhook_secret and channel.bot_token:
+        try:
+            telegram_delete_webhook(decrypt_str(channel.bot_token))
+        except Exception:
+            pass
+
+    db.query(TelegramChatLink).filter(TelegramChatLink.channel_id == channel.id).delete()
     db.delete(channel)
     db.commit()
 
     return {"deleted": channel_id}
+
+
+@app.post("/channels/telegram/webhook/{webhook_secret}")
+async def telegram_webhook(
+    webhook_secret: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    channel = (
+        db.query(ChatChannel).filter(ChatChannel.webhook_secret == webhook_secret).first()
+    )
+    if not channel:
+        # Always 200 so Telegram doesn't treat a stale/removed channel as a
+        # delivery failure and keep retrying.
+        return {"ok": True}
+
+    try:
+        update = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    try:
+        handle_telegram_update(db, channel, update, RETRIEVAL_GATE, plan_priority)
+    except Exception:
+        logger.exception("Telegram webhook handling failed for channel %s", channel.id)
+
+    return {"ok": True}
 
 
 @app.get("/stats", response_model=StatsOut)

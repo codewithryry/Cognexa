@@ -8,11 +8,17 @@ import {
   getBillingPlan,
   getChatChannels,
   PlanPayload,
+  testTelegramChannel,
+  TelegramTestResult,
 } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
 
 const AVAILABLE_CHANNELS = [
-  { name: "Telegram", description: "Connect a Telegram bot", available: false },
+  {
+    name: "Telegram",
+    description: "Connect a Telegram bot (create one via @BotFather, then paste its token below)",
+    available: true,
+  },
 ];
 
 export default function ChatChannelsSettingsPage() {
@@ -23,6 +29,8 @@ export default function ChatChannelsSettingsPage() {
   const [botToken, setBotToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [testResults, setTestResults] = useState<Record<number, TelegramTestResult>>({});
 
   function loadChannels() {
     getChatChannels()
@@ -41,6 +49,11 @@ export default function ChatChannelsSettingsPage() {
   const connectedNames = new Set(channels.map((c) => c.channel_name));
 
   async function handleConnect(channelName: string) {
+    if (channelName === "Telegram" && !botToken.trim()) {
+      notify("Paste your bot's token from @BotFather first.", "error");
+      return;
+    }
+
     setConnecting(true);
     try {
       const saved = await createChatChannel(channelName, botToken.trim() || null);
@@ -52,6 +65,19 @@ export default function ChatChannelsSettingsPage() {
       notify(err instanceof Error ? err.message : "Failed to connect chat channel.", "error");
     } finally {
       setConnecting(false);
+    }
+  }
+
+  async function handleTest(channel: ChatChannelPayload) {
+    setTestingId(channel.id);
+    try {
+      const result = await testTelegramChannel(channel.id);
+      setTestResults((prev) => ({ ...prev, [channel.id]: result }));
+      notify(result.status_message, result.ok ? "success" : "error");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to test the Telegram connection.", "error");
+    } finally {
+      setTestingId(null);
     }
   }
 
@@ -110,28 +136,63 @@ export default function ChatChannelsSettingsPage() {
           </div>
         ) : (
           <ul className="mt-5 space-y-2">
-            {channels.map((channel) => (
-              <li
-                key={channel.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 dark:border-gray-800 p-3"
-              >
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {channel.channel_name}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {channel.connected ? "Connected" : "Saved without bot token"}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleDisconnect(channel)}
-                  disabled={removingId === channel.id}
-                  className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 transition hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
+            {channels.map((channel) => {
+              const result = testResults[channel.id];
+              return (
+                <li
+                  key={channel.id}
+                  className="rounded-xl border border-gray-100 dark:border-gray-800 p-3"
                 >
-                  {removingId === channel.id ? "Removing..." : "Disconnect"}
-                </button>
-              </li>
-            ))}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {channel.channel_name}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {channel.connected
+                          ? channel.bot_username
+                            ? `Connected · @${channel.bot_username}`
+                            : "Connected"
+                          : "Saved without bot token"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {channel.channel_name.toLowerCase() === "telegram" && (
+                        <button
+                          onClick={() => handleTest(channel)}
+                          disabled={testingId === channel.id}
+                          className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 transition hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                        >
+                          {testingId === channel.id ? "Testing..." : "Test Connection"}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDisconnect(channel)}
+                        disabled={removingId === channel.id}
+                        className="rounded-lg border border-red-200 dark:border-red-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 transition hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
+                      >
+                        {removingId === channel.id ? "Removing..." : "Disconnect"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {result && (
+                    <div
+                      className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                        result.ok
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                          : "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400"
+                      }`}
+                    >
+                      {result.status_message}
+                      {result.pending_update_count > 0 && (
+                        <> · {result.pending_update_count} update(s) waiting to be delivered</>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -197,7 +258,7 @@ export default function ChatChannelsSettingsPage() {
                     <input
                       value={botToken}
                       onChange={(e) => setBotToken(e.target.value)}
-                      placeholder="Paste the bot token (optional)"
+                      placeholder="Paste the bot token from @BotFather"
                       className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 text-xs text-gray-900 dark:text-gray-100 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-500/20"
                     />
                     <button

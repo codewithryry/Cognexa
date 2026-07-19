@@ -699,6 +699,7 @@ export interface ChatChannelPayload {
   id: number;
   channel_name: string;
   connected: boolean;
+  bot_username: string | null;
   created_at: string | null;
 }
 
@@ -740,6 +741,28 @@ export async function deleteChatChannel(id: number) {
 
   if (!response.ok) {
     throw new Error("Failed to disconnect chat channel.");
+  }
+
+  return response.json();
+}
+
+export interface TelegramTestResult {
+  ok: boolean;
+  status_message: string;
+  webhook_url: string | null;
+  pending_update_count: number;
+  last_error_message: string | null;
+  last_error_date: number | null;
+}
+
+export async function testTelegramChannel(id: number): Promise<TelegramTestResult> {
+  const response = await fetch(`${API_URL}/chat-channels/${id}/telegram/test`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to test the Telegram connection.");
   }
 
   return response.json();

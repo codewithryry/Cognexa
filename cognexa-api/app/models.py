@@ -100,7 +100,30 @@ class ChatChannel(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     channel_name = Column(String(100), nullable=False)
-    bot_token = Column(String(255), nullable=True)
+    # Encrypted at rest via app.crypto.encrypt_str/decrypt_str.
+    bot_token = Column(Text, nullable=True)
+    bot_username = Column(String(150), nullable=True)
+    # Unique per-channel path segment for its webhook URL -- doubles as the
+    # bearer secret that authenticates inbound Telegram webhook calls, since
+    # there's no user session on that request.
+    webhook_secret = Column(String(64), nullable=True, unique=True, index=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
+class TelegramChatLink(Base):
+    """One row per distinct Telegram chat that has messaged a connected bot.
+    Keeps that chat's conversation in its own ChatSession, separate from any
+    other Telegram user (or the owner's own web-app chats) hitting the same
+    channel's RAG pipeline."""
+
+    __tablename__ = "telegram_chat_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    channel_id = Column(Integer, ForeignKey("chat_channels.id"), nullable=False, index=True)
+    telegram_chat_id = Column(BigInteger, nullable=False, index=True)
+    telegram_username = Column(String(150), nullable=True)
+    chat_session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 
