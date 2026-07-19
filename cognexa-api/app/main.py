@@ -262,6 +262,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "https://cognexarag.onrender.com",
+        "https://cognexa-api.onrender.com",
+        "https://*.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
