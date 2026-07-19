@@ -1,5 +1,3 @@
-import chromadb
-from sentence_transformers import SentenceTransformer
 import os
 
 
@@ -8,12 +6,19 @@ VECTOR_PATH = "app/vector_db"
 os.makedirs(VECTOR_PATH, exist_ok=True)
 
 
-client = chromadb.PersistentClient(
-    path=VECTOR_PATH
-)
-
-
+_client = None
 _model = None
+
+
+def get_client():
+    """chromadb (and the onnxruntime it pulls in) is only imported on first
+    use, not at server boot, so Render's port scan/health check succeeds
+    before paying that memory cost."""
+    global _client
+    if _client is None:
+        import chromadb
+        _client = chromadb.PersistentClient(path=VECTOR_PATH)
+    return _client
 
 
 def get_embedding_model():
@@ -21,6 +26,7 @@ def get_embedding_model():
     Render's health check before paying the torch/model-load memory cost."""
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
@@ -33,12 +39,12 @@ def get_user_collection(user_id):
     """Every user gets their own Chroma collection, so a brand-new user (or a
     user whose collection was previously dropped) always starts from a clean,
     empty index with no other user's embeddings or metadata reachable from it."""
-    return client.get_or_create_collection(name=user_collection_name(user_id))
+    return get_client().get_or_create_collection(name=user_collection_name(user_id))
 
 
 def delete_user_collection(user_id):
     try:
-        client.delete_collection(name=user_collection_name(user_id))
+        get_client().delete_collection(name=user_collection_name(user_id))
     except Exception:
         pass
 
