@@ -14,8 +14,10 @@ const PLAN_DISPLAY_NAMES: Record<string, string> = {
 const TABS = ["Overview", "Billing History", "Points"] as const;
 type Tab = (typeof TABS)[number];
 
-function formatMB(bytes: number) {
-  return (bytes / (1024 * 1024)).toFixed(1);
+function formatStorage(bytes: number) {
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatDate(iso: string | null) {
@@ -171,8 +173,8 @@ export default function BillingSettingsPage() {
                 label="Storage"
                 value={
                   plan.max_storage_bytes != null
-                    ? `${formatMB(plan.storage_bytes)} GB/${formatMB(plan.max_storage_bytes)} GB`
-                    : `${formatMB(plan.storage_bytes)} MB / Unlimited`
+                    ? `${formatStorage(plan.storage_bytes)} / ${formatStorage(plan.max_storage_bytes)}`
+                    : `${formatStorage(plan.storage_bytes)} / Unlimited`
                 }
                 fraction={
                   plan.max_storage_bytes != null ? plan.storage_bytes / plan.max_storage_bytes : null
@@ -180,7 +182,7 @@ export default function BillingSettingsPage() {
                 usedLabel={`${planName} Plan used`}
                 usedValue={
                   plan.max_storage_bytes != null
-                    ? `${formatMB(plan.storage_bytes)} GB /${formatMB(plan.max_storage_bytes)} GB`
+                    ? `${formatStorage(plan.storage_bytes)} / ${formatStorage(plan.max_storage_bytes)}`
                     : undefined
                 }
               />
