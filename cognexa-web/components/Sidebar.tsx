@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChatSessionPayload,
-  createChatSession,
   deleteChatSession,
   getChatSessions,
   SESSIONS_CHANGED_EVENT,
@@ -112,7 +111,6 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(true);
   const [sessions, setSessions] = useState<ChatSessionPayload[]>([]);
-  const [creatingChat, setCreatingChat] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const { confirm, notify } = useDialog();
 
@@ -151,19 +149,13 @@ export default function Sidebar() {
     });
   }
 
-  async function handleNewChat() {
-    if (creatingChat) return;
-
-    setCreatingChat(true);
-    try {
-      const session = await createChatSession();
-      router.push(`/chat?session=${session.id}`);
-    } catch {
-      // The Chat page falls back to creating its own session if this fails.
-      router.push("/chat");
-    } finally {
-      setCreatingChat(false);
-    }
+  function handleNewChat() {
+    // Don't eagerly create a session here -- the chat page creates one
+    // lazily on the first message, which avoids leaving an empty "New Chat"
+    // row (and a duplicate-looking sidebar entry) behind when the user
+    // navigates away without sending anything. `new=1` tells the chat page
+    // to reset to a blank composer instead of resuming the last session.
+    router.push("/chat?new=1");
   }
 
   async function handleDeleteSession(e: React.MouseEvent, session: ChatSessionPayload) {
@@ -311,7 +303,6 @@ export default function Sidebar() {
                 <div className="mt-1 space-y-0.5 border-l border-gray-200 dark:border-white/5 pl-3 ml-4">
                   <button
                     onClick={handleNewChat}
-                    disabled={creatingChat}
                     className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white disabled:opacity-50"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.75} stroke="currentColor" className="h-3.5 w-3.5 shrink-0">

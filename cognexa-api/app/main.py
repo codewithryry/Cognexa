@@ -1018,12 +1018,33 @@ def list_chat_sessions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return (
+    sessions = (
         db.query(ChatSession)
         .filter(ChatSession.user_id == current_user.id)
         .order_by(ChatSession.updated_at.desc())
         .all()
     )
+
+    # A session is created eagerly on "New Chat" before any message is sent;
+    # if the user navigates away without sending one, it's an empty orphan --
+    # hide it here (and clean it up) instead of showing a title-less duplicate.
+    # Skip sessions created in the last 2 minutes so we don't delete the one
+    # the user just opened and hasn't sent a message in yet.
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
+    empty_ids = [
+        s.id
+        for s in sessions
+        if s.title == "New Chat"
+        and s.created_at
+        and s.created_at.replace(tzinfo=timezone.utc) < cutoff
+        and not db.query(ChatMessage.id).filter(ChatMessage.session_id == s.id).first()
+    ]
+    if empty_ids:
+        db.query(ChatSession).filter(ChatSession.id.in_(empty_ids)).delete(synchronize_session=False)
+        db.commit()
+        sessions = [s for s in sessions if s.id not in empty_ids]
+
+    return sessions
 
 
 @app.post("/chat/sessions", response_model=ChatSessionOut)
@@ -1883,10 +1904,7 @@ def get_stats(
     total_documents = len(documents)
     total_chunks = sum(doc.chunks or 0 for doc in documents)
 
-    storage_bytes = 0
-    for doc in documents:
-        if doc.file_path and os.path.exists(doc.file_path):
-            storage_bytes += os.path.getsize(doc.file_path)
+    storage_bytes = sum(doc.size_bytes or 0 for doc in documents)
 
     today = datetime.now(timezone.utc).date()
     questions_today = (

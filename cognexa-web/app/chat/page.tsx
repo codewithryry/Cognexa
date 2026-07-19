@@ -101,17 +101,54 @@ function ChatPageInner() {
   useEffect(() => {
     let cancelled = false;
 
-    async function init() {
+    async function syncFromUrl() {
+      const sessionParam = searchParams.get("session");
+      const requestedId = sessionParam ? Number(sessionParam) : null;
+
+      // Coming from a dataset's "Ask AI" button (a `doc` param with no explicit
+      // `session`), or an explicit "New Chat" click (`new=1`), should always
+      // start a fresh chat instead of resuming whatever chat was last used.
+      const startFresh = !sessionParam && (searchParams.get("doc") || searchParams.get("new"));
+      if (startFresh) {
+        setSessionId(null);
+        setMessages([]);
+        setLoading(false);
+        return;
+      }
+
+      // A specific session is requested in the URL (e.g. the sidebar link for
+      // another chat was clicked). If it's already the one loaded, there's
+      // nothing to refetch; otherwise load it — this is what makes switching
+      // sessions from the sidebar actually update the page.
+      if (requestedId) {
+        if (requestedId === sessionId) {
+          setLoading(false);
+          return;
+        }
+        try {
+          const history = await getChatSessionMessages(requestedId);
+          if (cancelled) return;
+          setSessionId(requestedId);
+          setMessages(history);
+        } catch (err) {
+          if (!cancelled) {
+            notify(err instanceof Error ? err.message : "Failed to load chat history.", "error");
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+        return;
+      }
+
+      // No session/doc/new param at all — this is the first load of /chat
+      // with a bare URL, so resume the most recently used session, if any.
+      if (sessionId !== null) {
+        setLoading(false);
+        return;
+      }
       try {
         const sessions = await getChatSessions();
-        const requestedId = Number(searchParams.get("session"));
-        // Coming from a dataset's "Ask AI" button (a `doc` param with no explicit
-        // `session`) should always start a fresh chat instead of resuming whatever
-        // chat was last used — don't fall back to sessions[0] in that case.
-        const startFresh = !searchParams.get("session") && searchParams.get("doc");
-        const target = startFresh
-          ? undefined
-          : sessions.find((s) => s.id === requestedId) ?? sessions[0];
+        const target = sessions[0];
         if (cancelled) return;
 
         // No session yet — leave sessionId null instead of eagerly creating one here.
@@ -135,12 +172,12 @@ function ChatPageInner() {
       }
     }
 
-    init();
+    syncFromUrl();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     getIntegrations()
