@@ -2069,11 +2069,25 @@ async def telegram_webhook(
     except Exception:
         return {"ok": True}
 
+    channel_id = channel.id
+
     def run_update():
+        # Use a dedicated session/row instead of the request-scoped `db` and
+        # `channel` above -- those belong to the webhook request, which has
+        # already returned its response by the time this runs.
+        background_db = SessionLocal()
         try:
-            handle_telegram_update(db, channel, update, RETRIEVAL_GATE, plan_priority)
+            logger.info("Processing Telegram update for channel %s", channel_id)
+            channel_row = (
+                background_db.query(ChatChannel).filter(ChatChannel.id == channel_id).first()
+            )
+            if channel_row:
+                handle_telegram_update(background_db, channel_row, update, RETRIEVAL_GATE, plan_priority)
+            logger.info("Finished Telegram update for channel %s", channel_id)
         except Exception:
-            logger.exception("Telegram webhook handling failed for channel %s", channel.id)
+            logger.exception("Telegram webhook handling failed for channel %s", channel_id)
+        finally:
+            background_db.close()
 
     # Acknowledge Telegram immediately instead of blocking on RAG generation
     # (which can take longer than Telegram/Render's proxy will wait, and on
