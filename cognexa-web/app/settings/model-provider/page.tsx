@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: SettingsPayload = {
   chunk_overlap: 50,
   theme: "dark",
   email_notifications: true,
+  security_email_alerts: true,
   auto_reindex_stuck: false,
   duplicate_detection: true,
 };

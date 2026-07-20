@@ -12,6 +12,8 @@ import {
 } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
 import DocumentFilter from "@/components/DocumentFilter";
+import useAIProviderStatus from "@/lib/useAIProviderStatus";
+import AIProviderNotice from "@/components/AIProviderNotice";
 
 function stripMarkdown(text: string) {
   return text
@@ -62,6 +64,7 @@ function loadCache(): PersistedCache {
 
 export default function ReportPage() {
   const { notify } = useDialog();
+  const aiProvider = useAIProviderStatus();
   const [sessions, setSessions] = useState<ChatSessionPayload[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [generatingSessionId, setGeneratingSessionId] = useState<number | null>(null);
@@ -220,6 +223,14 @@ export default function ReportPage() {
     } finally {
       setExporting(null);
     }
+  }
+
+  if (!aiProvider.loading && !aiProvider.connected) {
+    return (
+      <div className="space-y-8">
+        <AIProviderNotice variant="report" />
+      </div>
+    );
   }
 
   return (

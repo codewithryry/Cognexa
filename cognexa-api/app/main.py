@@ -39,7 +39,7 @@ from app.models import (
     User,
 )
 from app.crypto import decrypt_str, encrypt_str
-from app.services.email_service import send_security_alert, send_welcome_email
+from app.services.email_service import is_configured as email_is_configured, send_security_alert, send_welcome_email
 from app.telegram import (
     generate_webhook_secret,
     handle_telegram_update,
@@ -272,6 +272,29 @@ try:
     ensure_user_columns()
 except Exception:
     logger.exception("ensure_user_columns failed; continuing startup")
+
+
+def ensure_settings_columns():
+    """settings predates security_email_alerts (split out from
+    email_notifications so security emails aren't silenced by the general
+    notifications toggle) -- add it by hand if missing, defaulting existing
+    rows to enabled."""
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("settings")}
+    if "security_email_alerts" in columns:
+        return
+
+    with engine.connect() as conn:
+        conn.execute(
+            text("ALTER TABLE settings ADD COLUMN security_email_alerts BOOLEAN NOT NULL DEFAULT TRUE")
+        )
+        conn.commit()
+
+
+try:
+    ensure_settings_columns()
+except Exception:
+    logger.exception("ensure_settings_columns failed; continuing startup")
 
 
 def migrate_orphan_chat_messages():
@@ -530,7 +553,9 @@ def register(user_in: UserCreate, background_tasks: BackgroundTasks, db: Session
 
     token = create_access_token({"sub": str(user.id)})
 
-    background_tasks.add_task(send_welcome_email, user.email, user.name)
+    settings = get_or_create_settings(db, user.id)
+    if settings.email_notifications:
+        background_tasks.add_task(send_welcome_email, user.email, user.name)
 
     return {"access_token": token, "user": user}
 
@@ -557,13 +582,15 @@ def login(
     if not user.first_login_at:
         user.first_login_at = datetime.now(timezone.utc)
         db.commit()
-        background_tasks.add_task(
-            send_security_alert,
-            user.email,
-            user.name,
-            "new_login",
-            "We noticed a new login to your Cognexa account.",
-        )
+        settings = get_or_create_settings(db, user.id)
+        if settings.security_email_alerts:
+            background_tasks.add_task(
+                send_security_alert,
+                user.email,
+                user.name,
+                "new_login",
+                "We noticed a new login to your Cognexa account.",
+            )
 
     return {"access_token": token, "user": user}
 
@@ -590,13 +617,15 @@ def update_me(
     db.refresh(current_user)
 
     if password_changed:
-        background_tasks.add_task(
-            send_security_alert,
-            current_user.email,
-            current_user.name,
-            "password_changed",
-            "Your Cognexa account password was just changed.",
-        )
+        settings = get_or_create_settings(db, current_user.id)
+        if settings.security_email_alerts:
+            background_tasks.add_task(
+                send_security_alert,
+                current_user.email,
+                current_user.name,
+                "password_changed",
+                "Your Cognexa account password was just changed.",
+            )
 
     return current_user
 
@@ -1526,6 +1555,11 @@ def read_settings(
     db: Session = Depends(get_db),
 ):
     return get_or_create_settings(db, current_user.id)
+
+
+@app.get("/settings/email-status")
+def read_email_status(current_user: User = Depends(get_current_user)):
+    return {"configured": email_is_configured()}
 
 
 @app.put("/settings", response_model=SettingsOut)

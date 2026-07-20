@@ -62,6 +62,10 @@ class Settings(Base):
     chunk_overlap = Column(Integer, default=50)
     theme = Column(String(20), default="dark")
     email_notifications = Column(Boolean, default=True)
+    # Separate from email_notifications and on by default -- security emails
+    # (password changed, new login) shouldn't go silent just because someone
+    # turned off general notifications.
+    security_email_alerts = Column(Boolean, default=True)
     auto_reindex_stuck = Column(Boolean, default=False)
     duplicate_detection = Column(Boolean, default=True)
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

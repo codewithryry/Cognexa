@@ -473,6 +473,7 @@ export interface SettingsPayload {
   chunk_overlap: number;
   theme: string;
   email_notifications: boolean;
+  security_email_alerts: boolean;
   auto_reindex_stuck: boolean;
   duplicate_detection: boolean;
 }
@@ -486,6 +487,18 @@ export async function updateSettings(settings: SettingsPayload) {
 
   if (!response.ok) {
     throw new Error("Failed to save settings.");
+  }
+
+  return response.json();
+}
+
+export async function getEmailStatus(): Promise<{ configured: boolean }> {
+  const response = await fetch(`${API_URL}/settings/email-status`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load email status.");
   }
 
   return response.json();

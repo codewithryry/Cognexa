@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSettings, SettingsPayload, updateSettings } from "@/lib/api";
+import { getEmailStatus, getSettings, SettingsPayload, updateSettings } from "@/lib/api";
 import { useDialog } from "@/lib/DialogContext";
 
 const DEFAULT_SETTINGS: SettingsPayload = {
@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS: SettingsPayload = {
   chunk_overlap: 50,
   theme: "dark",
   email_notifications: true,
+  security_email_alerts: true,
   auto_reindex_stuck: false,
   duplicate_detection: true,
 };
@@ -21,6 +22,7 @@ export default function AutomationSettingsPage() {
   const [settings, setSettings] = useState<SettingsPayload>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [emailConfigured, setEmailConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
     getSettings()
@@ -29,6 +31,9 @@ export default function AutomationSettingsPage() {
         notify(err instanceof Error ? err.message : "Failed to load settings.", "error")
       )
       .finally(() => setLoading(false));
+    getEmailStatus()
+      .then((data) => setEmailConfigured(data.configured))
+      .catch(() => setEmailConfigured(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -65,18 +70,40 @@ export default function AutomationSettingsPage() {
           Notifications
         </h2>
         <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-          These preferences are saved to your account, but no mail provider is connected yet —
-          no emails are sent until one is.
+          {emailConfigured === false
+            ? "These preferences are saved to your account, but no mail provider is connected yet — no emails are sent until one is."
+            : "These preferences control which emails Cognexa sends to your account."}
         </p>
 
         <div className="space-y-3">
           <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 dark:border-gray-800 p-3">
-            <span className="text-sm text-gray-700 dark:text-gray-300">Email notifications</span>
+            <div>
+              <span className="block text-sm text-gray-700 dark:text-gray-300">Email notifications</span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                Welcome email and other general account notifications.
+              </span>
+            </div>
             <input
               type="checkbox"
               checked={settings.email_notifications}
               onChange={(e) => update("email_notifications", e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+          </label>
+
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 dark:border-gray-800 p-3">
+            <div>
+              <span className="block text-sm text-gray-700 dark:text-gray-300">Security alerts</span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                Password changed and new login emails. Separate from the toggle above and on by
+                default — recommended to leave enabled.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.security_email_alerts}
+              onChange={(e) => update("security_email_alerts", e.target.checked)}
+              className="h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
             />
           </label>
         </div>

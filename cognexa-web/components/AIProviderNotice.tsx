@@ -3,7 +3,7 @@
 import Link from "next/link";
 import SetupGuideLink from "@/components/SetupGuideLink";
 
-type Variant = "dashboard" | "banner" | "upload" | "chat";
+type Variant = "dashboard" | "banner" | "upload" | "chat" | "report";
 
 const COPY: Record<Variant, { title: string; body: string }> = {
   dashboard: {
@@ -23,6 +23,11 @@ const COPY: Record<Variant, { title: string; body: string }> = {
     title: "Chat is unavailable",
     body:
       "Chat is unavailable until an AI provider is configured. Connect to Ollama or use BYOK to continue.",
+  },
+  report: {
+    title: "AI setup required",
+    body:
+      "Configure an AI provider before generating reports from your dataset or chat history.",
   },
 };
 

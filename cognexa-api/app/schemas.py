@@ -57,6 +57,7 @@ class SettingsIn(BaseModel):
     chunk_overlap: int
     theme: str
     email_notifications: bool = True
+    security_email_alerts: bool = True
     auto_reindex_stuck: bool = False
     duplicate_detection: bool = True
 

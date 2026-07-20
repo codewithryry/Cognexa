@@ -1,6 +1,8 @@
 import logging
 import os
 
+from app.services import gmail_service
+
 logger = logging.getLogger("uvicorn.error")
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
@@ -22,12 +24,18 @@ def _render(template: str, **values) -> str:
     return template
 
 
-def _send(to_email: str, subject: str, html: str) -> None:
+def _send_via_gmail(to_email: str, subject: str, html: str) -> None:
+    try:
+        gmail_service.send_html_email(to_email, subject, html)
+    except gmail_service.GmailNotAuthorizedError as exc:
+        logger.error("Gmail not authorized -- skipping email (subject=%r, to=%s): %s", subject, to_email, exc)
+    except Exception:
+        logger.exception("Failed to send email via Gmail API (subject=%r, to=%s)", subject, to_email)
+
+
+def _send_via_resend(to_email: str, subject: str, html: str) -> None:
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
-        # No key configured (e.g. local dev) -- log and skip instead of
-        # failing the request that triggered this email.
-        logger.warning("RESEND_API_KEY not set -- skipping email (subject=%r, to=%s)", subject, to_email)
         return
 
     import resend
@@ -43,7 +51,32 @@ def _send(to_email: str, subject: str, html: str) -> None:
             "html": html,
         })
     except Exception:
-        logger.exception("Failed to send email (subject=%r, to=%s)", subject, to_email)
+        logger.exception("Failed to send email via Resend (subject=%r, to=%s)", subject, to_email)
+
+
+def is_configured() -> bool:
+    """Whether either email backend has been set up on this deployment --
+    used by the frontend to explain why notification toggles have no effect
+    yet, instead of a hardcoded claim that goes stale once one is."""
+    return gmail_service.is_authorized() or bool(os.getenv("RESEND_API_KEY"))
+
+
+def _send(to_email: str, subject: str, html: str) -> None:
+    # Gmail API takes priority if authorized -- it can send to any
+    # recipient with no domain verification needed, unlike Resend's sandbox
+    # mode (which only delivers to the account owner's own address until a
+    # custom domain is verified).
+    if gmail_service.is_authorized():
+        _send_via_gmail(to_email, subject, html)
+        return
+
+    if os.getenv("RESEND_API_KEY"):
+        _send_via_resend(to_email, subject, html)
+        return
+
+    # Nothing configured (e.g. local dev) -- log and skip instead of failing
+    # the request that triggered this email.
+    logger.warning("No email backend configured -- skipping email (subject=%r, to=%s)", subject, to_email)
 
 
 def send_welcome_email(to_email: str, name: str, dashboard_url: str | None = None) -> None:
