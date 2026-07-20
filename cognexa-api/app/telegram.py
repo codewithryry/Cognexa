@@ -1,12 +1,15 @@
+import logging
 import secrets
 from datetime import datetime, timezone
 
 import requests
 from sqlalchemy.orm import Session
 
-from app.crypto import decrypt_str, encrypt_str
+from app.crypto import decrypt_str
 from app.models import ChatChannel, ChatMessage, ChatSession, Integration, Settings, TelegramChatLink, User
 from app.query import generate_answer_stream
+
+logger = logging.getLogger("uvicorn.error")
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
 
@@ -115,16 +118,36 @@ def _get_or_create_session(db: Session, channel: ChatChannel, link: TelegramChat
     return session
 
 
-def _resolve_integration(db: Session, user_id: int) -> Integration | None:
-    integration = (
+def _resolve_integrations(db: Session, user_id: int) -> list[Integration]:
+    """All of the user's configured LLM integrations with an API key set,
+    most-recently-added first -- the order attempts are tried in, so if the
+    newest/primary one is down, older ones still connected act as a backup."""
+    return (
         db.query(Integration)
-        .filter(Integration.user_id == user_id)
+        .filter(Integration.user_id == user_id, Integration.api_key.isnot(None))
         .order_by(Integration.created_at.desc())
-        .first()
+        .all()
     )
-    if integration and integration.api_key:
-        return integration
-    return None
+
+
+def _run_generation(question, user_id, settings, integration):
+    full_answer = []
+    sources = []
+    for event in generate_answer_stream(
+        question,
+        user_id=user_id,
+        ollama_url=settings.ollama_url,
+        llm_model=settings.llm_model,
+        external_provider=integration.provider_name if integration else None,
+        external_api_key=integration.api_key if integration else None,
+        external_base_url=integration.base_url if integration else None,
+        external_model=integration.model if integration else None,
+    ):
+        if event["type"] == "sources":
+            sources = event["sources"]
+        elif event["type"] == "token":
+            full_answer.append(event["content"])
+    return "".join(full_answer), sources
 
 
 def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retrieval_gate, plan_priority_fn) -> None:
@@ -152,27 +175,30 @@ def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retr
             return
         plan = user.plan or "community"
 
-        integration = _resolve_integration(db, channel.user_id)
+        # Try every integration the user has connected, most recent first;
+        # if one is dead (bad key, provider outage, timeout), fall back to
+        # the next, and finally to the local Ollama model as a last resort
+        # rather than leaving the user without any reply.
+        candidates = _resolve_integrations(db, channel.user_id) + [None]
 
-        full_answer = []
+        answer_text = None
         sources = []
+        last_error = None
         with retrieval_gate(plan_priority_fn(plan)):
-            for event in generate_answer_stream(
-                question,
-                user_id=channel.user_id,
-                ollama_url=settings.ollama_url,
-                llm_model=settings.llm_model,
-                external_provider=integration.provider_name if integration else None,
-                external_api_key=integration.api_key if integration else None,
-                external_base_url=integration.base_url if integration else None,
-                external_model=integration.model if integration else None,
-            ):
-                if event["type"] == "sources":
-                    sources = event["sources"]
-                elif event["type"] == "token":
-                    full_answer.append(event["content"])
+            for candidate in candidates:
+                try:
+                    answer_text, sources = _run_generation(question, channel.user_id, settings, candidate)
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    label = candidate.provider_name if candidate else "local model"
+                    logger.warning("Telegram: provider '%s' failed, trying next: %s", label, exc)
+                    continue
 
-        answer_text = "".join(full_answer) or "I couldn't find an answer to that."
+        if answer_text is None:
+            raise last_error or RuntimeError("No AI provider was able to answer.")
+
+        answer_text = answer_text or "I couldn't find an answer to that."
 
         chat_message = ChatMessage(
             user_id=channel.user_id,
