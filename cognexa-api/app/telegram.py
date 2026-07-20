@@ -170,6 +170,7 @@ def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retr
         return
 
     try:
+        logger.info("Telegram: resolving session/settings for channel %s", channel.id)
         link = _get_or_create_chat_link(db, channel, chat)
         is_first_message = link.chat_session_id is None
         session = _get_or_create_session(db, channel, link)
@@ -193,16 +194,23 @@ def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retr
         answer_text = None
         sources = []
         last_error = None
+        logger.info(
+            "Telegram: starting AI generation for channel %s (%d candidate provider(s))",
+            channel.id, len(candidates),
+        )
         with retrieval_gate(plan_priority_fn(plan)):
             for candidate in candidates:
+                label = candidate.provider_name if candidate else "local model"
                 try:
+                    logger.info("Telegram: trying provider '%s' for channel %s", label, channel.id)
                     answer_text, sources = _run_generation(question, channel.user_id, settings, candidate, db)
+                    logger.info("Telegram: provider '%s' succeeded for channel %s", label, channel.id)
                     break
                 except Exception as exc:
                     last_error = exc
-                    label = candidate.provider_name if candidate else "local model"
                     logger.warning("Telegram: provider '%s' failed, trying next: %s", label, exc)
                     continue
+        logger.info("Telegram: AI generation finished for channel %s", channel.id)
 
         if answer_text is None:
             raise last_error or RuntimeError("No AI provider was able to answer.")
@@ -221,9 +229,13 @@ def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retr
             session.title = question[:60]
         session.updated_at = datetime.now(timezone.utc)
         db.commit()
+        logger.info("Telegram: saved chat message for channel %s", channel.id)
 
+        logger.info("Telegram: sending reply for channel %s", channel.id)
         telegram_send_message(bot_token, chat["id"], answer_text)
+        logger.info("Telegram: reply sent for channel %s", channel.id)
     except Exception as exc:
+        logger.exception("Telegram: handling failed for channel %s", channel.id)
         try:
             telegram_send_message(bot_token, chat["id"], f"Sorry, something went wrong: {exc}")
         except Exception:
