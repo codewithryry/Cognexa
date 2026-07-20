@@ -7,7 +7,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile, File, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, UploadFile, File, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 import os
@@ -2053,6 +2053,7 @@ def delete_chat_channel(
 async def telegram_webhook(
     webhook_secret: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     channel = (
@@ -2068,10 +2069,20 @@ async def telegram_webhook(
     except Exception:
         return {"ok": True}
 
-    try:
-        handle_telegram_update(db, channel, update, RETRIEVAL_GATE, plan_priority)
-    except Exception:
-        logger.exception("Telegram webhook handling failed for channel %s", channel.id)
+    def run_update():
+        try:
+            handle_telegram_update(db, channel, update, RETRIEVAL_GATE, plan_priority)
+        except Exception:
+            logger.exception("Telegram webhook handling failed for channel %s", channel.id)
+
+    # Acknowledge Telegram immediately instead of blocking on RAG generation
+    # (which can take longer than Telegram/Render's proxy will wait, and on
+    # its very first call also pays torch/sentence-transformers' load cost)
+    # -- a slow or crashed synchronous response here is what surfaces to
+    # Telegram as "Wrong response from the webhook: 502 Bad Gateway". The
+    # actual reply still gets sent via sendMessage once this finishes, just
+    # decoupled from the webhook's own response.
+    background_tasks.add_task(run_update)
 
     return {"ok": True}
 
