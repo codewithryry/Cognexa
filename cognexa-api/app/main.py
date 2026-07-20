@@ -39,6 +39,7 @@ from app.models import (
     User,
 )
 from app.crypto import decrypt_str, encrypt_str
+from app.services.email_service import send_security_alert, send_welcome_email
 from app.telegram import (
     generate_webhook_secret,
     handle_telegram_update,
@@ -252,6 +253,25 @@ try:
     ensure_chat_channel_columns()
 except Exception:
     logger.exception("ensure_chat_channel_columns failed; continuing startup")
+
+
+def ensure_user_columns():
+    """users predates first_login_at (added for the one-time "new login"
+    security alert email) -- add it by hand if missing."""
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("users")}
+    if "first_login_at" in columns:
+        return
+
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN first_login_at TIMESTAMP NULL"))
+        conn.commit()
+
+
+try:
+    ensure_user_columns()
+except Exception:
+    logger.exception("ensure_user_columns failed; continuing startup")
 
 
 def migrate_orphan_chat_messages():
@@ -492,7 +512,7 @@ def health_db(db: Session = Depends(get_db)):
 
 
 @app.post("/auth/register", response_model=TokenOut)
-def register(user_in: UserCreate, db: Session = Depends(get_db)):
+def register(user_in: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.email == user_in.email).first()
 
     if existing:
@@ -510,11 +530,17 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 
     token = create_access_token({"sub": str(user.id)})
 
+    background_tasks.add_task(send_welcome_email, user.email, user.name)
+
     return {"access_token": token, "user": user}
 
 
 @app.post("/auth/login", response_model=TokenOut)
-def login(credentials: UserLogin, db: Session = Depends(get_db)):
+def login(
+    credentials: UserLogin,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.email == credentials.email).first()
 
     if not user or not verify_password(credentials.password, user.password):
@@ -524,6 +550,20 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
         )
 
     token = create_access_token({"sub": str(user.id)})
+
+    # Only the very first login ever gets a "new login" alert -- every
+    # login after that is silent, since re-alerting every time would just be
+    # noise for a returning user.
+    if not user.first_login_at:
+        user.first_login_at = datetime.now(timezone.utc)
+        db.commit()
+        background_tasks.add_task(
+            send_security_alert,
+            user.email,
+            user.name,
+            "new_login",
+            "We noticed a new login to your Cognexa account.",
+        )
 
     return {"access_token": token, "user": user}
 
@@ -536,16 +576,27 @@ def me(current_user: User = Depends(get_current_user)):
 @app.patch("/auth/me", response_model=UserOut)
 def update_me(
     user_in: UserUpdate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     current_user.name = user_in.name
+    password_changed = bool(user_in.password)
 
     if user_in.password:
         current_user.password = hash_password(user_in.password)
 
     db.commit()
     db.refresh(current_user)
+
+    if password_changed:
+        background_tasks.add_task(
+            send_security_alert,
+            current_user.email,
+            current_user.name,
+            "password_changed",
+            "Your Cognexa account password was just changed.",
+        )
 
     return current_user
 

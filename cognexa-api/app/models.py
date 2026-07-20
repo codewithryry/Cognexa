@@ -15,6 +15,11 @@ class User(Base):
     ai_credits_used = Column(Integer, default=0)
     ai_credits_period_start = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    # Set the first time this user calls POST /auth/login (not set at
+    # registration, since that already sends its own welcome email) --
+    # the "new login" security alert only fires once, the first time this
+    # is null, rather than on every login.
+    first_login_at = Column(TIMESTAMP, nullable=True)
 
     documents = relationship("Document", back_populates="owner")
 
