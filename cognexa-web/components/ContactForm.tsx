@@ -87,7 +87,7 @@ export default function ContactForm() {
             href="mailto:hello@cognexa.io"
             className="font-medium text-indigo-600 dark:text-indigo-300"
           >
-            hello@cognexa.io
+            cognexarag@gmail.com
           </a>
         </span>
 

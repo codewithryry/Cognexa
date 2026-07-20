@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import DemoCheckoutModal from "@/components/DemoCheckoutModal";
 import MarketingNav from "@/components/MarketingNav";
+import MarketingFooter from "@/components/MarketingFooter";
 
 const FEATURES = [
   {
@@ -67,7 +68,6 @@ const PLANS = [
       "3 AI providers supported",
       "10 connected apps",
       "Priority indexing",
-      "Email support",
       "Advanced retrieval",
     ],
     cta: "Upgrade Now",
@@ -94,10 +94,10 @@ const PLANS = [
 ];
 
 const STATS = [
+  { value: "12+", label: "AI Models" },
+  { value: "5+", label: "Integrations" },
   { value: "100%", label: "Self-hosted" },
-  { value: "12+", label: "AI Providers" },
-  { value: "3", label: "File Types" },
-  { value: "24/7", label: "Local Access" },
+  { value: "24/7", label: "AI Access" },
 ];
 
 // Custom hook for scroll animations
@@ -181,24 +181,14 @@ export default function Home() {
       <MarketingNav />
 
       {/* Hero Section - Updated pt-20 to pt-16, mt-8 to mt-6, and mt-20 to mt-16 */}
-      <section className="relative mx-auto max-w-7xl px-6 pt-16 pb-32">
+      <section className="relative mx-auto max-w-7xl px-6 pt-8 pb-32">
         <div
           ref={heroRef.ref}
           className={`relative mx-auto max-w-5xl text-center transition-all duration-1000 ${
             heroRef.isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
           }`}
         >
-          <div className="animate-fade-in-up">
-            <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/70 px-4 py-1.5 text-xs font-medium text-indigo-600 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-white/5 dark:text-indigo-300">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-              </span>
-              Self-hosted RAG Platform
-            </span>
-          </div>
-
-          <h1 className="mt-6 bg-gradient-to-r from-gray-950 via-indigo-600 to-fuchsia-600 bg-clip-text text-6xl font-bold leading-[1.1] text-transparent sm:text-7xl md:text-8xl dark:from-white dark:via-indigo-200 dark:to-fuchsia-200 animate-fade-in-up animation-delay-200">
+          <h1 className="bg-gradient-to-r from-gray-950 via-indigo-600 to-fuchsia-600 bg-clip-text text-6xl font-bold leading-[1.1] text-transparent sm:text-7xl md:text-8xl dark:from-white dark:via-indigo-200 dark:to-fuchsia-200 animate-fade-in-up animation-delay-200">
             Your documents.
             <br />
             Your AI dataset.
@@ -206,8 +196,7 @@ export default function Home() {
 
           <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-600 dark:text-slate-400 animate-fade-in-up animation-delay-400">
             Upload documents, build a searchable dataset, and ask questions in plain
-            language — answered through Retrieval-Augmented Generation, running
-            entirely on your own machine.
+            language — answered through Retrieval-Augmented Generation
           </p>
 
           <div className="mt-10 flex flex-wrap justify-center gap-4 animate-fade-in-up animation-delay-600">
@@ -242,12 +231,44 @@ export default function Home() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                   </svg>
                 </Link>
-                <Link
-                  href="/login"
-                  className="rounded-xl border border-gray-200 bg-white/80 px-8 py-4 text-sm font-semibold text-gray-900 shadow-sm transition-all hover:border-gray-300 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 dark:hover:border-white/20 backdrop-blur-sm"
-                >
-                  Sign In
-                </Link>
+                  <div className="relative inline-flex group/tooltip">
+                    <a
+                      href="https://github.com/codewithryry/Cognexa"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Open the Cognexa GitHub repository"
+                      className="group inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white/80 px-8 py-4 text-sm font-semibold text-gray-900 shadow-sm transition-all hover:-translate-y-1 hover:border-gray-900 hover:bg-gray-900 hover:text-white hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:border-white/40 dark:hover:bg-white/10 backdrop-blur-sm"
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.09 3.29 9.4 7.86 10.93.58.1.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.87-1.54-3.87-1.54-.53-1.33-1.29-1.69-1.29-1.69-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.02 11.02 0 0 1 5.79 0c2.2-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.43-2.7 5.4-5.27 5.69.41.36.78 1.08.78 2.17 0 1.57-.01 2.83-.01 3.22 0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z" />
+                      </svg>
+
+                      <span>View on GitHub</span>
+
+                      <svg
+                        className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M7 17L17 7M17 7H9m8 0v8"
+                        />
+                      </svg>
+                    </a>
+
+                    <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium whitespace-nowrap text-white opacity-0 shadow-lg transition-all duration-200 group-hover/tooltip:translate-y-1 group-hover/tooltip:opacity-100 dark:bg-white dark:text-gray-900">
+                      Source code available on GitHub
+                    </div>
+                  </div>
               </>
             )}
           </div>
@@ -493,16 +514,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-gray-200 px-6 py-8 dark:border-white/5">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 text-sm text-gray-500 sm:flex-row dark:text-slate-500">
-          <span>© {new Date().getFullYear()} Cognexa. Self-hosted RAG platform.</span>
-          <span className="flex items-center gap-2">
-            Built with Next.js, FastAPI, ChromaDB & Ollama.
-            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
-        </div>
-      </footer>
+      <MarketingFooter />
 
       {checkoutPlan && (
         <DemoCheckoutModal

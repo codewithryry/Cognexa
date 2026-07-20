@@ -28,7 +28,7 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-const PUBLIC_EXACT_ROUTES = ["/", "/login", "/contact"];
+const PUBLIC_EXACT_ROUTES = ["/", "/login", "/contact", "/about"];
 const PUBLIC_ROUTE_PREFIXES = ["/docs", "/solutions", "/resources", "/community"];
 const IDLE_LIMIT_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVITY_EVENTS = ["mousemove", "keydown", "click", "scroll", "touchstart"];
@@ -50,7 +50,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   function logout() {
     clearToken();
     setUser(null);
-    router.replace("/login");
+    router.replace("/");
   }
 
   async function refreshUser() {

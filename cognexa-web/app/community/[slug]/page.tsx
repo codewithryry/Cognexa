@@ -3,6 +3,7 @@
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import MarketingNav from "@/components/MarketingNav";
+import MarketingFooter from "@/components/MarketingFooter";
 import ComingSoonBadge from "@/components/ComingSoonBadge";
 import { getCommunityChannel } from "@/lib/communityData";
 import { REPO_URL } from "@/lib/constants";
@@ -60,12 +61,7 @@ export default function CommunityChannelPage() {
         </div>
       </div>
 
-      <footer className="border-t border-gray-200 px-6 py-8 dark:border-white/5">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-sm text-gray-500 sm:flex-row dark:text-slate-500">
-          <span>© {new Date().getFullYear()} Cognexa. Self-hosted RAG platform. </span>
-          <span>Built with Next.js, FastAPI, ChromaDB & Ollama.</span>
-        </div>
-      </footer>
+      <MarketingFooter />
     </main>
   );
 }

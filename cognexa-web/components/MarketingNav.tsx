@@ -122,6 +122,14 @@ export default function MarketingNav() {
             >
               Docs
             </Link>
+            <Link
+              href="/about"
+              className={`transition hover:text-gray-900 dark:hover:text-white ${
+                pathname === "/about" ? "text-gray-900 dark:text-white" : ""
+              }`}
+            >
+              About
+            </Link>
             <NavDropdown label="Solutions" active={solutionsActive} links={SOLUTIONS_LINKS} />
             <NavDropdown label="Resources" active={resourcesActive} links={RESOURCES_LINKS} />
             <NavDropdown label="Community" active={communityActive} links={COMMUNITY_LINKS} />
