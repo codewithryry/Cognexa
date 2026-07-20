@@ -316,11 +316,20 @@ UPLOAD_FOLDER = "app/uploads"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Render sets this automatically on every service it runs -- never set
+# locally, so this stays false in local dev with zero config, and tightens
+# resource usage in production without touching local behavior at all.
+IS_PRODUCTION = bool(os.getenv("RENDER"))
+
 # Priority scheduling backing the plan pricing claims: paid plans' document
 # indexing jobs and chat generations are served ahead of Community's when
 # multiple are in flight at once. See app/scheduler.py.
-INDEX_POOL = PriorityWorkerPool(num_workers=3)
-RETRIEVAL_GATE = PrioritySlotGate(capacity=2)
+# In production (small Render instance), fewer concurrent indexing workers
+# and a tighter retrieval-concurrency cap trade a little throughput for a lot
+# less peak memory -- each worker/slot loading the RAG pipeline concurrently
+# is what has been pushing the instance over its memory limit.
+INDEX_POOL = PriorityWorkerPool(num_workers=1 if IS_PRODUCTION else 3)
+RETRIEVAL_GATE = PrioritySlotGate(capacity=1 if IS_PRODUCTION else 2)
 
 
 def index_document_job(document_id, text, filename, user_id, chunk_size, chunk_overlap):
@@ -1036,6 +1045,7 @@ async def ask_question(
                     external_api_key=selected_integration.api_key if selected_integration else None,
                     external_base_url=selected_integration.base_url if selected_integration else None,
                     external_model=selected_integration.model if selected_integration else None,
+                    db=db,
                 ):
                     if event["type"] == "sources":
                         sources = event["sources"]
@@ -1300,6 +1310,7 @@ def report_dataset(
             external_api_key=selected_integration.api_key if selected_integration else None,
             external_base_url=selected_integration.base_url if selected_integration else None,
             external_model=selected_integration.model if selected_integration else None,
+            db=db,
         ):
             if event["type"] == "sources":
                 sources = event["sources"]

@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 from datetime import datetime, timezone
 
@@ -12,6 +13,9 @@ from app.query import generate_answer_stream
 logger = logging.getLogger("uvicorn.error")
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
+
+# Same signal main.py uses -- set automatically by Render, never locally.
+IS_PRODUCTION = bool(os.getenv("RENDER"))
 
 
 def generate_webhook_secret() -> str:
@@ -130,7 +134,7 @@ def _resolve_integrations(db: Session, user_id: int) -> list[Integration]:
     )
 
 
-def _run_generation(question, user_id, settings, integration):
+def _run_generation(question, user_id, settings, integration, db):
     full_answer = []
     sources = []
     for event in generate_answer_stream(
@@ -142,6 +146,7 @@ def _run_generation(question, user_id, settings, integration):
         external_api_key=integration.api_key if integration else None,
         external_base_url=integration.base_url if integration else None,
         external_model=integration.model if integration else None,
+        db=db,
     ):
         if event["type"] == "sources":
             sources = event["sources"]
@@ -177,9 +182,13 @@ def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retr
 
         # Try every integration the user has connected, most recent first;
         # if one is dead (bad key, provider outage, timeout), fall back to
-        # the next, and finally to the local Ollama model as a last resort
-        # rather than leaving the user without any reply.
-        candidates = _resolve_integrations(db, channel.user_id) + [None]
+        # the next. In production there's no local Ollama running, so a
+        # local-model attempt (None) would just burn a connection timeout on
+        # every failure -- only add it as a last resort in local dev, where
+        # Ollama is realistically available.
+        candidates = _resolve_integrations(db, channel.user_id)
+        if not IS_PRODUCTION:
+            candidates = candidates + [None]
 
         answer_text = None
         sources = []
@@ -187,7 +196,7 @@ def handle_telegram_update(db: Session, channel: ChatChannel, update: dict, retr
         with retrieval_gate(plan_priority_fn(plan)):
             for candidate in candidates:
                 try:
-                    answer_text, sources = _run_generation(question, channel.user_id, settings, candidate)
+                    answer_text, sources = _run_generation(question, channel.user_id, settings, candidate, db)
                     break
                 except Exception as exc:
                     last_error = exc

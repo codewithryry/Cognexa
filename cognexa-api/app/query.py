@@ -4,6 +4,7 @@ import httpx
 import requests
 import ollama
 
+from app.models import Document
 from app.rag import get_embedding_model, get_user_collection
 
 
@@ -243,7 +244,7 @@ def stream_external_provider(provider_name, api_key, base_url, model, system_pro
         raise ValueError(f"Unsupported provider style: {style}")
 
 
-def search_document(question, user_id, document_ids=None, limit=8, pool_size=24, per_doc_cap=2):
+def search_document(question, user_id, document_ids=None, limit=8, pool_size=24, per_doc_cap=2, db=None):
 
     collection = get_user_collection(user_id)
 
@@ -256,12 +257,21 @@ def search_document(question, user_id, document_ids=None, limit=8, pool_size=24,
         # global similarity query, which lets one large/dominant document's
         # chunks crowd the whole result pool and starve the others out before
         # the per-document cap below ever gets a chance to run.
-        existing = collection.get(include=["metadatas"])
-        document_ids = sorted({
-            meta.get("document_id")
-            for meta in (existing.get("metadatas") or [])
-            if meta and meta.get("document_id") is not None
-        })
+        if db is not None:
+            # The SQL documents table already has this list, indexed by
+            # user_id -- reading it here is far cheaper than pulling every
+            # chunk's metadata out of Chroma (thousands of rows for a large
+            # knowledge base) just to collect their distinct document_ids.
+            document_ids = sorted(
+                row[0] for row in db.query(Document.id).filter(Document.user_id == user_id).all()
+            )
+        else:
+            existing = collection.get(include=["metadatas"])
+            document_ids = sorted({
+                meta.get("document_id")
+                for meta in (existing.get("metadatas") or [])
+                if meta and meta.get("document_id") is not None
+            })
 
     # Candidate chunks grouped per document (each list already ordered by
     # similarity rank), so we can distribute the final `limit` fairly across
@@ -335,9 +345,10 @@ def generate_answer(
     document_ids=None,
     ollama_url="http://localhost:11434",
     llm_model="llama3.2",
+    db=None,
 ):
 
-    documents, metadatas = search_document(question, user_id, document_ids=document_ids)
+    documents, metadatas = search_document(question, user_id, document_ids=document_ids, db=db)
 
     if not documents:
         return {
@@ -402,9 +413,10 @@ def generate_answer_stream(
     external_api_key=None,
     external_base_url=None,
     external_model=None,
+    db=None,
 ):
 
-    documents, metadatas = search_document(question, user_id, document_ids=document_ids)
+    documents, metadatas = search_document(question, user_id, document_ids=document_ids, db=db)
 
     if not documents:
         yield {"type": "sources", "sources": []}
