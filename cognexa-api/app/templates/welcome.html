@@ -1,20 +1,45 @@
-<div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
-  <h1 style="font-size: 20px; margin-bottom: 4px;">Welcome to Cognexa, {{name}}!</h1>
-  <p style="color: #4b5563; line-height: 1.6;">
-    Your account is ready. Cognexa turns your documents into a searchable AI knowledge base --
-    upload files, ask questions, and get answers grounded in your own content.
-  </p>
-  <ul style="color: #4b5563; line-height: 1.8;">
-    <li>Upload documents and let Cognexa index them automatically</li>
-    <li>Chat with an AI that answers using your own knowledge base</li>
-    <li>Connect Google Drive or a Telegram bot to reach the same assistant elsewhere</li>
-  </ul>
-  <p style="margin-top: 24px;">
-    <a href="{{dashboard_url}}" style="background: linear-gradient(90deg, #4f46e5, #c026d3); color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600;">
-      Go to your dashboard
-    </a>
-  </p>
-  <p style="color: #9ca3af; font-size: 12px; margin-top: 32px;">
-    You're receiving this because an account was created with this email address on Cognexa.
-  </p>
-</div>
+<body style="margin: 0; padding: 0; background: #f3f4f6;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #f3f4f6; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width: 480px; width: 100%; background: #ffffff; border-radius: 12px; overflow: hidden; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;">
+          <tr>
+            <td style="background: linear-gradient(90deg, #4f46e5, #c026d3); padding: 20px 32px;">
+              <span style="color: #ffffff; font-size: 18px; font-weight: 700; letter-spacing: 0.2px;">Cognexa</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px;">
+              <p style="color: #1f2937; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">Hi {{name}},</p>
+              <p style="color: #4b5563; font-size: 14px; line-height: 1.6; margin: 0 0 16px;">
+                Your account is ready. Cognexa turns your documents into a searchable AI knowledge base --
+                upload files, ask questions, and get answers grounded in your own content.
+              </p>
+              <ul style="color: #4b5563; font-size: 14px; line-height: 1.8; margin: 0 0 24px; padding-left: 20px;">
+                <li>Upload documents and let Cognexa index them automatically</li>
+                <li>Chat with an AI that answers using your own knowledge base</li>
+                <li>Connect Google Drive or a Telegram bot to reach the same assistant elsewhere</li>
+              </ul>
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background: linear-gradient(90deg, #4f46e5, #c026d3); border-radius: 8px;">
+                    <a href="{{dashboard_url}}" style="display: inline-block; padding: 12px 24px; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none;">
+                      Go to your dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 16px 32px 24px; border-top: 1px solid #e5e7eb;">
+              <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 16px 0 0;">
+                You're receiving this because an account was created with this email address on Cognexa.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
