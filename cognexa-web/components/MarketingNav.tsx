@@ -107,13 +107,19 @@ export default function MarketingNav() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-sm font-bold text-white">
-              C
-            </span>
+            <img src="/Cognexa.png" alt="Cognexa" className="h-10 w-10 rounded-xl object-cover" />
             <span className="text-lg font-semibold">Cognexa</span>
           </Link>
 
           <div className="hidden items-center gap-6 text-sm font-medium text-gray-600 dark:text-slate-400 lg:flex">
+            <Link
+              href="/about"
+              className={`transition hover:text-gray-900 dark:hover:text-white ${
+                pathname === "/about" ? "text-gray-900 dark:text-white" : ""
+              }`}
+            >
+              Overview 
+            </Link>
             <Link
               href="/docs"
               className={`transition hover:text-gray-900 dark:hover:text-white ${
@@ -121,14 +127,6 @@ export default function MarketingNav() {
               }`}
             >
               Docs
-            </Link>
-            <Link
-              href="/about"
-              className={`transition hover:text-gray-900 dark:hover:text-white ${
-                pathname === "/about" ? "text-gray-900 dark:text-white" : ""
-              }`}
-            >
-              About
             </Link>
             <NavDropdown label="Solutions" active={solutionsActive} links={SOLUTIONS_LINKS} />
             <NavDropdown label="Resources" active={resourcesActive} links={RESOURCES_LINKS} />

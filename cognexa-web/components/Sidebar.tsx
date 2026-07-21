@@ -199,11 +199,11 @@ export default function Sidebar() {
           <button
             onClick={collapsed ? toggleCollapsed : undefined}
             title={collapsed ? "Expand sidebar" : undefined}
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 font-bold text-white shadow-lg shadow-indigo-500/30 ${
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl object-cover shadow-lg shadow-indigo-500/30 ${
               collapsed ? "cursor-pointer" : "cursor-default"
             }`}
           >
-            C
+            <img src="/Cognexa.png" alt="Cognexa" className="h-12 w-12 rounded-xl object-cover" />
           </button>
           {!collapsed && (
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white leading-tight">

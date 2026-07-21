@@ -165,21 +165,15 @@ export default function About() {
             </p>
           </div>
 
-          <div className="order-1 flex aspect-[4/3] w-full items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 text-gray-400 sm:order-2 dark:border-white/15 dark:bg-white/5 dark:text-slate-500">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              className="h-10 w-10"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M2.25 15.75l5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3 8.25v9a1.5 1.5 0 0 0 1.5 1.5h15a1.5 1.5 0 0 0 1.5-1.5v-9m-18 0A1.5 1.5 0 0 1 4.5 6.75h15A1.5 1.5 0 0 1 21 8.25m-18 0v.75m18-.75v.75M9 9.75a1.125 1.125 0 1 1-2.25 0 1.125 1.125 0 0 1 2.25 0Z"
-              />
-            </svg>
+          <div className="order-1 flex aspect-[4/3] w-full items-center justify-center sm:order-2">
+            <Image
+              src="/Values.png"
+              alt="Cognexa AI Platform"
+              width={700}
+              height={525}
+              priority
+              className="h-auto w-full object-contain"
+            />
           </div>
         </Section>
       </section>
@@ -291,13 +285,15 @@ export default function About() {
           Industry Partner
         </span>
         <h2 className="mt-2 text-2xl font-bold text-gray-900 sm:text-3xl dark:text-white"> {/* Changed: mt-3 to mt-2 */}
-          In partnership with EACOMM
+          In partnership with EACOMM Corporation
         </h2>
-        <p className="mt-2 max-w-2xl text-gray-600 dark:text-slate-400"> {/* Changed: mt-3 to mt-2 */}
-          EACOMM is the company connected to the team&apos;s internship
-          experience, where members gained practical experience in
-          technology, development, and professional collaboration —
-          experience that directly shaped how Cognexa was built.
+        <p className="mt-2 max-w-2xl text-gray-600 dark:text-slate-400">
+          EACOMM served as the host company for the team&apos;s TESDA
+          Supervised Industry Learning (SIL), where the members gained
+          hands-on industry experience in software development, AI-powered
+          technologies, research, and professional collaboration. The
+          knowledge and skills acquired during the program became the
+          foundation for building Cognexa.
         </p>
       </div>
     </div>

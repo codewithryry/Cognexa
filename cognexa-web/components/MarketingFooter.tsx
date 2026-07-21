@@ -41,14 +41,12 @@ export default function MarketingFooter() {
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
           <div>
-            <Link href="/" className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-sm font-bold text-white">
-                C
-              </span>
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">
-                Cognexa
-              </span>
-            </Link>
+          <Link href="/" className="flex items-center gap-2">
+            <img src="/Cognexa.png" alt="Cognexa" className="h-10 w-10 rounded-xl object-cover" />
+            <span className="text-lg font-semibold text-gray-900 dark:text-white">
+              Cognexa
+            </span>
+          </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-gray-600 dark:text-slate-400">
               The self-hosted RAG platform for organizing documents and
               retrieving answers grounded in your own knowledge.
