@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserCreate(BaseModel):
@@ -253,3 +253,234 @@ class StatsOut(BaseModel):
     total_chunks: int
     questions_today: int
     storage_bytes: int
+
+
+# ============================================================
+# SDLC Platform Schemas
+# ============================================================
+
+
+class ProjectIn(BaseModel):
+    name: str
+    description: str | None = None
+    status: str = "planning"
+    sdlc_stage: str = "planning"
+    repository_url: str | None = None
+    start_date: datetime | None = None
+    target_date: datetime | None = None
+
+
+class ProjectOut(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    description: str | None = None
+    status: str
+    sdlc_stage: str
+    repository_url: str | None = None
+    start_date: datetime | None = None
+    target_date: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    generation_stage: str | None = None
+    generation_progress: dict | None = None
+    generation_error: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class SDLCStageIn(BaseModel):
+    stage_type: str
+    name: str
+    description: str | None = None
+    priority: int = 0
+    assigned_to: int | None = None
+
+
+class SDLCStageOut(BaseModel):
+    id: int
+    project_id: int
+    stage_type: str
+    status: str
+    name: str
+    description: str | None = None
+    assigned_to: int | None = None
+    priority: int
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectArtifactIn(BaseModel):
+    stage_id: int | None = None
+    artifact_type: str
+    name: str
+    description: str | None = None
+    metadata: dict | None = None
+
+
+class ProjectArtifactOut(BaseModel):
+    id: int
+    project_id: int
+    stage_id: int | None = None
+    artifact_type: str
+    name: str
+    description: str | None = None
+    file_path: str | None = None
+    file_type: str | None = None
+    size_bytes: int | None = None
+    content_hash: str | None = None
+    metadata: dict | None = Field(default=None, validation_alias="artifact_metadata")
+    version: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class PipelineStepIn(BaseModel):
+    step_order: int
+    step_type: str
+    name: str
+    config: dict | None = None
+    input_mapping: dict | None = None
+    output_mapping: dict | None = None
+    timeout_seconds: int = 300
+    retry_count: int = 0
+
+
+class PipelineStepOut(BaseModel):
+    id: int
+    pipeline_id: int
+    step_order: int
+    step_type: str
+    name: str
+    config: dict | None = None
+    input_mapping: dict | None = None
+    output_mapping: dict | None = None
+    timeout_seconds: int
+    retry_count: int
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class PipelineIn(BaseModel):
+    project_id: int | None = None
+    name: str
+    description: str | None = None
+    pipeline_type: str = "sdlc"
+    config: dict | None = None
+    is_template: bool = False
+    is_active: bool = True
+    steps: list[PipelineStepIn] = []
+
+
+class PipelineOut(BaseModel):
+    id: int
+    user_id: int
+    project_id: int | None = None
+    name: str
+    description: str | None = None
+    pipeline_type: str
+    config: dict | None = None
+    is_template: bool
+    is_active: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    steps: list[PipelineStepOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class PipelineExecutionOut(BaseModel):
+    id: int
+    pipeline_id: int
+    user_id: int
+    project_id: int | None = None
+    status: str
+    triggered_by: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    result: dict | None = None
+    error_message: str | None = None
+    duration_ms: int | None = None
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ToolIntegrationIn(BaseModel):
+    project_id: int | None = None
+    tool_name: str
+    display_name: str | None = None
+    config: dict | None = None
+    credentials_encrypted: str | None = None
+
+
+class ToolIntegrationOut(BaseModel):
+    id: int
+    user_id: int
+    project_id: int | None = None
+    tool_name: str
+    display_name: str | None = None
+    config: dict | None = None
+    status: str
+    status_message: str | None = None
+    version: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectArtifactContentOut(BaseModel):
+    content: str | None = None
+    generated_by: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectArtifactUpdateIn(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    content: str | None = None
+    metadata: dict | None = None
+
+
+class ArtifactGenerateIn(BaseModel):
+    stage_id: int | None = None
+    artifact_type: str
+    name: str
+    description: str | None = None
+    metadata: dict | None = None
+    artifact_prompt: str | None = None
+
+
+class SDLCActivityLogOut(BaseModel):
+    id: int
+    user_id: int
+    project_id: int | None = None
+    stage_id: int | None = None
+    action: str
+    entity_type: str | None = None
+    entity_id: int | None = None
+    description: str | None = None
+    metadata: dict | None = None
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True

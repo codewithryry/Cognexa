@@ -14,24 +14,24 @@ import MarketingFooter from "@/components/MarketingFooter";
 
 const FEATURES = [
   {
-    title: "Upload Anything",
+    title: "AI-Generated SDLC Plans",
     description:
-      "Drop in PDFs, DOCX files, and images — Cognexa extracts and indexes the text automatically.",
+      "Describe a project and Cognexa lays out the full lifecycle — requirements, design, development, testing, deployment — as a structured plan.",
   },
   {
-    title: "Retrieval-Augmented Answers",
+    title: "Automatic Artifacts",
     description:
-      "Ask questions and get answers grounded in your own documents, not just general model knowledge.",
+      "Requirements docs, architecture notes, source stubs, test cases, and deployment scripts are generated stage by stage, ready to review and edit.",
   },
   {
-    title: "Runs Locally",
+    title: "Real-Time Generation Tracking",
     description:
-      "Powered by a local Ollama LLM and ChromaDB vector store — your data never leaves your machine.",
+      "Watch each project move through Analyzing Requirements, Generating Architecture, and Creating Artifacts with live, per-stage progress.",
   },
   {
-    title: "Model Provider",
+    title: "Grounded in Your Documents",
     description:
-      "Connect Cline — or any other API-key based chatbot/assistant — from Settings so it can pull project context before prompting.",
+      "Upload existing specs or notes and Cognexa's retrieval layer grounds every generated artifact in your own project context.",
   },
 ];
 
@@ -94,8 +94,8 @@ const PLANS = [
 ];
 
 const STATS = [
+  { value: "6", label: "SDLC Stages" },
   { value: "12+", label: "AI Models" },
-  { value: "5+", label: "Integrations" },
   { value: "100%", label: "Self-hosted" },
   { value: "24/7", label: "AI Access" },
 ];
@@ -189,14 +189,16 @@ export default function Home() {
           }`}
         >
           <h1 className="bg-gradient-to-r from-gray-950 via-indigo-600 to-fuchsia-600 bg-clip-text text-6xl font-bold leading-[1.1] text-transparent sm:text-7xl md:text-8xl dark:from-white dark:via-indigo-200 dark:to-fuchsia-200 animate-fade-in-up animation-delay-200">
-            Your documents.
+            Turn ideas into
             <br />
-            Your AI dataset.
+            production-ready.
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-600 dark:text-slate-400 animate-fade-in-up animation-delay-400">
-            Upload documents, build a searchable dataset, and ask questions in plain
-            language — answered through Retrieval-Augmented Generation
+            Cognexa is an AI-powered Software Development Lifecycle platform that transforms
+            your project idea into a complete development workflow. Generate requirements,
+            architecture, documentation, code plans, testing strategies, deployment guides,
+            and project artifacts—all in one intelligent workspace.
           </p>
 
           <div className="mt-10 flex flex-wrap justify-center gap-4 animate-fade-in-up animation-delay-600">
@@ -308,14 +310,14 @@ export default function Home() {
         >
           <div className="mb-16 text-center">
             <h2 className="text-4xl font-bold text-gray-900 sm:text-5xl dark:text-white">
-              Everything you need,
+              A full SDLC pipeline,
               <br className="sm:hidden" />{" "}
               <span className="bg-gradient-to-r from-indigo-400 to-fuchsia-400 bg-clip-text text-transparent">
-                self-hosted
+                run by AI
               </span>
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-gray-600 dark:text-slate-400">
-              No external API keys required, no data leaving your infrastructure.
+              From requirements to deployment, self-hosted and running on your own infrastructure.
             </p>
           </div>
 
@@ -487,11 +489,11 @@ export default function Home() {
           <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-[0.05]" />
           <div className="relative">
             <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl dark:text-white">
-              Ready to build your dataset?
+              Ready to plan your next project?
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-gray-600 dark:text-slate-300">
-              Sign in and start uploading documents — your first indexed answer
-              is minutes away.
+              Sign in and describe your project — your first AI-generated SDLC
+              plan is minutes away.
             </p>
 
             <div className="mt-8">

@@ -934,3 +934,645 @@ export async function deleteAccount() {
 
   return response.json();
 }
+
+// ============================================================
+// SDLC Platform API
+// ============================================================
+
+export interface ProjectPayload {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  status: string;
+  sdlc_stage: string;
+  repository_url: string | null;
+  start_date: string | null;
+  target_date: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  generation_stage: string | null;
+  generation_progress: { stage: string; label: string; progress: number; error?: string } | null;
+  generation_error: string | null;
+}
+
+export interface ProjectInput {
+  name: string;
+  description?: string;
+  status?: string;
+  sdlc_stage?: string;
+  repository_url?: string;
+  start_date?: string;
+  target_date?: string;
+}
+
+export async function getProjects(): Promise<ProjectPayload[]> {
+  const response = await fetch(`${API_URL}/sdlc/projects`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load projects.");
+  }
+
+  return response.json();
+}
+
+export async function getProject(id: number): Promise<ProjectPayload> {
+  const response = await fetch(`${API_URL}/sdlc/projects/${id}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load project.");
+  }
+
+  return response.json();
+}
+
+export async function createProject(input: ProjectInput): Promise<ProjectPayload> {
+  const response = await fetch(`${API_URL}/sdlc/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create project.");
+  }
+
+  return response.json();
+}
+
+export async function updateProject(id: number, input: ProjectInput): Promise<ProjectPayload> {
+  const response = await fetch(`${API_URL}/sdlc/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update project.");
+  }
+
+  return response.json();
+}
+
+export async function deleteProject(id: number) {
+  const response = await fetch(`${API_URL}/sdlc/projects/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete project.");
+  }
+
+  return response.json();
+}
+
+export async function retryProjectGeneration(id: number): Promise<ProjectPayload> {
+  const response = await fetch(`${API_URL}/sdlc/projects/${id}/retry`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to retry generation.");
+  }
+
+  return response.json();
+}
+
+export interface SDLCStagePayload {
+  id: number;
+  project_id: number;
+  stage_type: string;
+  status: string;
+  name: string;
+  description: string | null;
+  assigned_to: number | null;
+  priority: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SDLCStageInput {
+  stage_type: string;
+  name: string;
+  description?: string;
+  priority?: number;
+  assigned_to?: number;
+}
+
+export async function getProjectStages(projectId: number): Promise<SDLCStagePayload[]> {
+  const response = await fetch(`${API_URL}/sdlc/projects/${projectId}/stages`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load stages.");
+  }
+
+  return response.json();
+}
+
+export async function createProjectStage(
+  projectId: number,
+  input: SDLCStageInput
+): Promise<SDLCStagePayload> {
+  const response = await fetch(`${API_URL}/sdlc/projects/${projectId}/stages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create stage.");
+  }
+
+  return response.json();
+}
+
+export async function updateStage(
+  stageId: number,
+  input: SDLCStageInput
+): Promise<SDLCStagePayload> {
+  const response = await fetch(`${API_URL}/sdlc/stages/${stageId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update stage.");
+  }
+
+  return response.json();
+}
+
+export async function updateStageStatus(stageId: number, status: string) {
+  const response = await fetch(`${API_URL}/sdlc/stages/${stageId}/status?status=${encodeURIComponent(status)}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to update stage status.");
+  }
+
+  return response.json();
+}
+
+export async function deleteStage(stageId: number) {
+  const response = await fetch(`${API_URL}/sdlc/stages/${stageId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete stage.");
+  }
+
+  return response.json();
+}
+
+export interface ProjectArtifactPayload {
+  id: number;
+  project_id: number;
+  stage_id: number | null;
+  artifact_type: string;
+  name: string;
+  description: string | null;
+  file_path: string | null;
+  file_type: string | null;
+  size_bytes: number | null;
+  content_hash: string | null;
+  content: string | null;
+  generated_by: string | null;
+  metadata: Record<string, unknown> | null;
+  version: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ProjectArtifactInput {
+  stage_id?: number;
+  artifact_type: string;
+  name: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getProjectArtifacts(
+  projectId: number,
+  stageId?: number,
+  artifactType?: string
+): Promise<ProjectArtifactPayload[]> {
+  const params = new URLSearchParams();
+  if (stageId) params.append("stage_id", String(stageId));
+  if (artifactType) params.append("artifact_type", artifactType);
+
+  const response = await fetch(`${API_URL}/sdlc/projects/${projectId}/artifacts?${params.toString()}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load artifacts.");
+  }
+
+  return response.json();
+}
+
+export async function createProjectArtifact(
+  projectId: number,
+  input: ProjectArtifactInput
+): Promise<ProjectArtifactPayload> {
+  const response = await fetch(`${API_URL}/sdlc/projects/${projectId}/artifacts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create artifact.");
+  }
+
+  return response.json();
+}
+
+export async function getArtifact(artifactId: number): Promise<ProjectArtifactPayload> {
+  const response = await fetch(`${API_URL}/sdlc/artifacts/${artifactId}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load artifact.");
+  }
+
+  return response.json();
+}
+
+export async function updateArtifact(
+  artifactId: number,
+  input: { name?: string; description?: string; content?: string; metadata?: Record<string, unknown> }
+): Promise<ProjectArtifactPayload> {
+  const response = await fetch(`${API_URL}/sdlc/artifacts/${artifactId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update artifact.");
+  }
+
+  return response.json();
+}
+
+export async function getArtifactContent(artifactId: number): Promise<{ content: string | null; generated_by: string | null }> {
+  const response = await fetch(`${API_URL}/sdlc/artifacts/${artifactId}/content`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load artifact content.");
+  }
+
+  return response.json();
+}
+
+export interface ArtifactGenerateInput {
+  stage_id?: number;
+  artifact_type: string;
+  name: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  artifact_prompt?: string;
+}
+
+export async function generateProjectArtifact(
+  projectId: number,
+  input: ArtifactGenerateInput,
+  integrationId?: number
+): Promise<ProjectArtifactPayload> {
+  const params = new URLSearchParams();
+  if (integrationId != null) {
+    params.append("integration_id", String(integrationId));
+  }
+
+  const response = await fetch(`${API_URL}/sdlc/projects/${projectId}/generate?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to generate artifact.");
+  }
+
+  return response.json();
+}
+
+export async function deleteArtifact(artifactId: number) {
+  const response = await fetch(`${API_URL}/sdlc/artifacts/${artifactId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete artifact.");
+  }
+
+  return response.json();
+}
+
+export async function downloadArtifactFile(artifactId: number, filename: string, format: string) {
+  const response = await fetch(`${API_URL}/sdlc/artifacts/${artifactId}/download?format=${encodeURIComponent(format)}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to download artifact.");
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const safeName = filename.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
+  link.download = `${safeName}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadAllArtifacts(projectId: number) {
+  const response = await fetch(`${API_URL}/sdlc/projects/${projectId}/artifacts/download-all`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to download artifacts.");
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "sdlc_artifacts.zip";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export interface ArtifactFileFormat {
+  format: string;
+  label: string;
+  extension: string;
+  icon: string;
+}
+
+export const ARTIFACT_FORMATS: ArtifactFileFormat[] = [
+  { format: "md", label: "Markdown", extension: ".md", icon: "📝" },
+  { format: "txt", label: "Plain Text", extension: ".txt", icon: "📄" },
+  { format: "json", extension: ".json", label: "JSON", icon: "📦" },
+];
+
+export interface PipelineStepPayload {
+  id: number;
+  pipeline_id: number;
+  step_order: number;
+  step_type: string;
+  name: string;
+  config: Record<string, unknown> | null;
+  input_mapping: Record<string, unknown> | null;
+  output_mapping: Record<string, unknown> | null;
+  timeout_seconds: number;
+  retry_count: number;
+  created_at: string | null;
+}
+
+export interface PipelinePayload {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  name: string;
+  description: string | null;
+  pipeline_type: string;
+  config: Record<string, unknown> | null;
+  is_template: boolean;
+  is_active: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  steps: PipelineStepPayload[];
+}
+
+export interface PipelineInput {
+  project_id?: number;
+  name: string;
+  description?: string;
+  pipeline_type?: string;
+  config?: Record<string, unknown>;
+  is_template?: boolean;
+  is_active?: boolean;
+  steps: PipelineStepInput[];
+}
+
+export interface PipelineStepInput {
+  step_order: number;
+  step_type: string;
+  name: string;
+  config?: Record<string, unknown>;
+  input_mapping?: Record<string, unknown>;
+  output_mapping?: Record<string, unknown>;
+  timeout_seconds?: number;
+  retry_count?: number;
+}
+
+export async function getPipelines(projectId?: number): Promise<PipelinePayload[]> {
+  const params = projectId ? `?project_id=${projectId}` : "";
+  const response = await fetch(`${API_URL}/sdlc/pipelines${params}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load pipelines.");
+  }
+
+  return response.json();
+}
+
+export async function getPipeline(id: number): Promise<PipelinePayload> {
+  const response = await fetch(`${API_URL}/sdlc/pipelines/${id}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load pipeline.");
+  }
+
+  return response.json();
+}
+
+export async function createPipeline(input: PipelineInput): Promise<PipelinePayload> {
+  const response = await fetch(`${API_URL}/sdlc/pipelines`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create pipeline.");
+  }
+
+  return response.json();
+}
+
+export async function executePipeline(pipelineId: number) {
+  const response = await fetch(`${API_URL}/sdlc/pipelines/${pipelineId}/execute`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to execute pipeline.");
+  }
+
+  return response.json();
+}
+
+export async function getPipelineExecutions(pipelineId: number) {
+  const response = await fetch(`${API_URL}/sdlc/pipelines/${pipelineId}/executions`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load pipeline executions.");
+  }
+
+  return response.json();
+}
+
+export interface ToolIntegrationPayload {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  tool_name: string;
+  display_name: string | null;
+  config: Record<string, unknown> | null;
+  status: string;
+  status_message: string | null;
+  version: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ToolIntegrationInput {
+  project_id?: number;
+  tool_name: string;
+  display_name?: string;
+  config?: Record<string, unknown>;
+  credentials_encrypted?: string;
+}
+
+export async function getToolIntegrations(projectId?: number): Promise<ToolIntegrationPayload[]> {
+  const params = projectId ? `?project_id=${projectId}` : "";
+  const response = await fetch(`${API_URL}/sdlc/tools${params}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load tool integrations.");
+  }
+
+  return response.json();
+}
+
+export async function createToolIntegration(input: ToolIntegrationInput): Promise<ToolIntegrationPayload> {
+  const response = await fetch(`${API_URL}/sdlc/tools`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to connect tool.");
+  }
+
+  return response.json();
+}
+
+export async function updateToolIntegration(
+  toolId: number,
+  input: ToolIntegrationInput
+): Promise<ToolIntegrationPayload> {
+  const response = await fetch(`${API_URL}/sdlc/tools/${toolId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to update tool integration.");
+  }
+
+  return response.json();
+}
+
+export async function deleteToolIntegration(toolId: number) {
+  const response = await fetch(`${API_URL}/sdlc/tools/${toolId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to disconnect tool.");
+  }
+
+  return response.json();
+}
+
+export interface SDLCActivityLogPayload {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  stage_id: number | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export async function getSDLCActivity(projectId?: number, limit = 50): Promise<SDLCActivityLogPayload[]> {
+  const params = new URLSearchParams();
+  if (projectId) params.append("project_id", String(projectId));
+  params.append("limit", String(limit));
+
+  const response = await fetch(`${API_URL}/sdlc/activity?${params.toString()}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load activity log.");
+  }
+
+  return response.json();
+}

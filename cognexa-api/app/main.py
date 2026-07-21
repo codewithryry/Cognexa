@@ -34,8 +34,17 @@ from app.models import (
     Document,
     GeneratedReport,
     Integration,
+    Pipeline,
+    PipelineExecution,
+    PipelineExecutionStep,
+    PipelineStep,
+    Project,
+    ProjectArtifact,
+    SDLCActivityLog,
+    SDLCStage,
     Settings,
     TelegramChatLink,
+    ToolIntegration,
     User,
 )
 from app.crypto import decrypt_str, encrypt_str
@@ -59,6 +68,7 @@ from app.google_drive import sync_connection as sync_google_drive_connection
 from app.rag import delete_document_chunks, delete_user_collection, process_document
 from app.query import generate_answer_stream, generate_report
 from app.scheduler import PriorityWorkerPool, PrioritySlotGate, plan_priority
+from app.sdlc import router as sdlc_router
 from app.schemas import (
     ChatChannelIn,
     ChatChannelOut,
@@ -144,6 +154,42 @@ try:
     Base.metadata.create_all(bind=engine)
 except Exception:
     logger.exception("Base.metadata.create_all failed; continuing startup")
+
+
+def ensure_sdlc_ai_content_columns():
+    """project_artifacts predates content/generated_by (added in migration_013)
+    -- add them by hand if missing."""
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("project_artifacts")}
+    with engine.connect() as conn:
+        if "content" not in columns:
+            conn.execute(text("ALTER TABLE project_artifacts ADD COLUMN content LONGTEXT NULL AFTER content_hash"))
+        if "generated_by" not in columns:
+            conn.execute(text("ALTER TABLE project_artifacts ADD COLUMN generated_by VARCHAR(20) NULL AFTER content"))
+        conn.commit()
+
+
+try:
+    ensure_sdlc_ai_content_columns()
+except Exception:
+    logger.exception("ensure_sdlc_ai_content_columns failed; continuing startup")
+
+
+def ensure_documents_project_id_index():
+    """documents.project_id already exists but may not be indexed."""
+    inspector = inspect(engine)
+    columns = {col["name"] for col in inspector.get_columns("documents")}
+    if "project_id" not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN project_id INTEGER NULL"))
+            conn.execute(text("ALTER TABLE documents ADD INDEX idx_documents_project_id (project_id)"))
+            conn.commit()
+
+
+try:
+    ensure_documents_project_id_index()
+except Exception:
+    logger.exception("ensure_documents_project_id_index failed; continuing startup")
 
 
 def ensure_chat_message_session_column():
@@ -354,6 +400,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(sdlc_router)
 
 UPLOAD_FOLDER = "app/uploads"
 
@@ -2433,6 +2481,30 @@ def delete_account(
     db.query(DataSourceConnection).filter(DataSourceConnection.user_id == current_user.id).delete()
     db.query(ChatChannel).filter(ChatChannel.user_id == current_user.id).delete()
     db.execute(text("DELETE FROM activity_log WHERE user_id = :user_id"), {"user_id": current_user.id})
+
+    # SDLC platform data — must be removed explicitly since these tables use
+    # NOT NULL user_id/project_id foreign keys with no DB-level cascade.
+    project_ids = [p.id for p in db.query(Project.id).filter(Project.user_id == current_user.id).all()]
+    if project_ids:
+        db.query(SDLCActivityLog).filter(SDLCActivityLog.project_id.in_(project_ids)).delete(synchronize_session=False)
+        db.query(ProjectArtifact).filter(ProjectArtifact.project_id.in_(project_ids)).delete(synchronize_session=False)
+        db.query(SDLCStage).filter(SDLCStage.project_id.in_(project_ids)).delete(synchronize_session=False)
+
+    pipeline_ids = [p.id for p in db.query(Pipeline.id).filter(Pipeline.user_id == current_user.id).all()]
+    if pipeline_ids:
+        execution_ids = [
+            e.id for e in db.query(PipelineExecution.id).filter(PipelineExecution.pipeline_id.in_(pipeline_ids)).all()
+        ]
+        if execution_ids:
+            db.query(PipelineExecutionStep).filter(PipelineExecutionStep.execution_id.in_(execution_ids)).delete(synchronize_session=False)
+        db.query(PipelineExecution).filter(PipelineExecution.pipeline_id.in_(pipeline_ids)).delete(synchronize_session=False)
+        db.query(PipelineStep).filter(PipelineStep.pipeline_id.in_(pipeline_ids)).delete(synchronize_session=False)
+        db.query(Pipeline).filter(Pipeline.id.in_(pipeline_ids)).delete(synchronize_session=False)
+
+    db.query(PipelineExecution).filter(PipelineExecution.user_id == current_user.id).delete(synchronize_session=False)
+    db.query(ToolIntegration).filter(ToolIntegration.user_id == current_user.id).delete(synchronize_session=False)
+    db.query(SDLCActivityLog).filter(SDLCActivityLog.user_id == current_user.id).delete(synchronize_session=False)
+    db.query(Project).filter(Project.user_id == current_user.id).delete(synchronize_session=False)
 
     db.delete(current_user)
     db.commit()

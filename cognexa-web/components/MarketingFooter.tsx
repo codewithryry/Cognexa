@@ -13,6 +13,7 @@ const COLUMNS = [
   {
     title: "Solutions",
     links: [
+      { label: "SDLC Projects", href: "/sdlc" },
       { label: "Knowledge Intelligence", href: "/solutions/knowledge-intelligence" },
       { label: "Document Analysis", href: "/solutions/document-analysis" },
       { label: "AI Research", href: "/solutions/ai-research" },
@@ -42,14 +43,14 @@ export default function MarketingFooter() {
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_1fr_1fr]">
           <div>
           <Link href="/" className="flex items-center gap-2">
-            <img src="/Cognexa.png" alt="Cognexa" className="h-10 w-10 rounded-xl object-cover" />
+            <img src="/Cognexa.png" alt="Cognexa" className="h-8 w-8 rounded-lg object-cover" />
             <span className="text-lg font-semibold text-gray-900 dark:text-white">
               Cognexa
             </span>
           </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-gray-600 dark:text-slate-400">
-              The self-hosted RAG platform for organizing documents and
-              retrieving answers grounded in your own knowledge.
+              The self-hosted AI platform that plans, generates, and documents
+              your software development lifecycle — end to end.
             </p>
 
             <a
@@ -87,7 +88,7 @@ export default function MarketingFooter() {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-gray-200 pt-6 text-sm text-gray-500 sm:flex-row dark:border-white/5 dark:text-slate-500">
-          <span>© {new Date().getFullYear()} Cognexa. Self-hosted RAG platform.</span>
+          <span>© {new Date().getFullYear()} Cognexa. Self-hosted AI SDLC platform.</span>
           <span className="flex items-center gap-2">
             Built with Next.js, FastAPI, ChromaDB & Ollama.
             <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />

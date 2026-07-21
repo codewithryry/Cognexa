@@ -1,4 +1,5 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy import BigInteger, Boolean, Column, Integer, String, Text, ForeignKey, TIMESTAMP, func, JSON
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -15,10 +16,6 @@ class User(Base):
     ai_credits_used = Column(Integer, default=0)
     ai_credits_period_start = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
-    # Set the first time this user calls POST /auth/login (not set at
-    # registration, since that already sends its own welcome email) --
-    # the "new login" security alert only fires once, the first time this
-    # is null, rather than on every login.
     first_login_at = Column(TIMESTAMP, nullable=True)
 
     documents = relationship("Document", back_populates="owner")
@@ -40,9 +37,6 @@ class Document(Base):
     content_hash = Column(String(64), nullable=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-    # Set only for documents pulled in by a data source sync (e.g. Google Drive)
-    # rather than a manual /upload — lets a re-sync tell "already ingested" from
-    # "removed at the source" apart via external_id, without touching manual uploads.
     source_type = Column(String(30), nullable=True)
     data_source_id = Column(Integer, ForeignKey("data_source_connections.id"), nullable=True, index=True)
     external_id = Column(String(255), nullable=True, index=True)
@@ -62,9 +56,6 @@ class Settings(Base):
     chunk_overlap = Column(Integer, default=50)
     theme = Column(String(20), default="dark")
     email_notifications = Column(Boolean, default=True)
-    # Separate from email_notifications and on by default -- security emails
-    # (password changed, new login) shouldn't go silent just because someone
-    # turned off general notifications.
     security_email_alerts = Column(Boolean, default=True)
     auto_reindex_stuck = Column(Boolean, default=False)
     duplicate_detection = Column(Boolean, default=True)
@@ -90,16 +81,11 @@ class DataSourceConnection(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     source_name = Column(String(100), nullable=False)
     credential = Column(Text, nullable=True)
-    # JSON-encoded, source-specific config — e.g. for Google Drive: name,
-    # primary_admin_email, my_drive_emails, shared_folder_urls, sync_deleted.
     config = Column(Text, nullable=True)
     status = Column(String(20), nullable=True)
     status_message = Column(Text, nullable=True)
     last_synced_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
-    # Sum of size_bytes across Documents currently synced from this
-    # connection (not the account's total Drive quota) — recomputed at the
-    # end of every sync.
     synced_size_bytes = Column(BigInteger, nullable=True, default=0)
 
 
@@ -109,23 +95,14 @@ class ChatChannel(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     channel_name = Column(String(100), nullable=False)
-    # Encrypted at rest via app.crypto.encrypt_str/decrypt_str.
     bot_token = Column(Text, nullable=True)
     bot_username = Column(String(150), nullable=True)
-    # Unique per-channel path segment for its webhook URL -- doubles as the
-    # bearer secret that authenticates inbound Telegram webhook calls, since
-    # there's no user session on that request.
     webhook_secret = Column(String(64), nullable=True, unique=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
 
 class TelegramChatLink(Base):
-    """One row per distinct Telegram chat that has messaged a connected bot.
-    Keeps that chat's conversation in its own ChatSession, separate from any
-    other Telegram user (or the owner's own web-app chats) hitting the same
-    channel's RAG pipeline."""
-
     __tablename__ = "telegram_chat_links"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -159,10 +136,6 @@ class ChatMessage(Base):
 
 
 class GeneratedReport(Base):
-    """A saved report. session_id set = generated from a chat session (one row per
-    session, upserted on regenerate). session_id null = the user's most recent
-    dataset-topic report (one row per user, upserted on regenerate)."""
-
     __tablename__ = "generated_reports"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -174,3 +147,201 @@ class GeneratedReport(Base):
     sources = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
+# ============================================================
+# SDLC Platform Models
+# ============================================================
+
+
+class Project(Base):
+    """Top-level workspace for an SDLC project lifecycle."""
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(30), default="planning")
+    sdlc_stage = Column(String(30), default="planning")
+    repository_url = Column(String(500), nullable=True)
+    start_date = Column(TIMESTAMP, nullable=True)
+    target_date = Column(TIMESTAMP, nullable=True)
+    completed_at = Column(TIMESTAMP, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    # Async generation tracking
+    generation_stage = Column(String(50), nullable=True)
+    generation_progress = Column(JSON, nullable=True)
+    generation_error = Column(Text, nullable=True)
+
+    owner = relationship("User", backref="projects")
+    stages = relationship("SDLCStage", back_populates="project", cascade="all, delete-orphan")
+    artifacts = relationship("ProjectArtifact", back_populates="project", cascade="all, delete-orphan")
+
+
+class SDLCStage(Base):
+    """Individual lifecycle stage within a project."""
+    __tablename__ = "sdlc_stages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    stage_type = Column(String(30), nullable=False)
+    status = Column(String(30), default="pending")
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    priority = Column(Integer, default=0)
+    started_at = Column(TIMESTAMP, nullable=True)
+    completed_at = Column(TIMESTAMP, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    project = relationship("Project", back_populates="stages")
+    artifacts = relationship("ProjectArtifact", back_populates="stage", cascade="all, delete-orphan")
+
+
+class ProjectArtifact(Base):
+    """Typed files associated with SDLC stages."""
+    __tablename__ = "project_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    stage_id = Column(Integer, ForeignKey("sdlc_stages.id"), nullable=True, index=True)
+    artifact_type = Column(String(30), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    file_path = Column(Text, nullable=True)
+    file_type = Column(String(50), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    content_hash = Column(String(64), nullable=True)
+    content = Column(LONGTEXT, nullable=True)
+    generated_by = Column(String(20), nullable=True)
+    artifact_metadata = Column("metadata", JSON, nullable=True)
+    version = Column(Integer, default=1)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    project = relationship("Project", back_populates="artifacts")
+    stage = relationship("SDLCStage", back_populates="artifacts")
+
+
+class Pipeline(Base):
+    """Workflow orchestration definition."""
+    __tablename__ = "pipelines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    pipeline_type = Column(String(50), default="sdlc")
+    config = Column(JSON, nullable=True)
+    is_template = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    steps = relationship("PipelineStep", back_populates="pipeline", cascade="all, delete-orphan",
+                          order_by="PipelineStep.step_order")
+    executions = relationship("PipelineExecution", back_populates="pipeline", cascade="all, delete-orphan")
+
+
+class PipelineStep(Base):
+    """Individual step in a pipeline workflow."""
+    __tablename__ = "pipeline_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=False, index=True)
+    step_order = Column(Integer, nullable=False)
+    step_type = Column(String(50), nullable=False)
+    name = Column(String(255), nullable=False)
+    config = Column(JSON, nullable=True)
+    input_mapping = Column(JSON, nullable=True)
+    output_mapping = Column(JSON, nullable=True)
+    timeout_seconds = Column(Integer, default=300)
+    retry_count = Column(Integer, default=0)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    pipeline = relationship("Pipeline", back_populates="steps")
+
+
+class PipelineExecution(Base):
+    """Runtime tracking of pipeline runs."""
+    __tablename__ = "pipeline_executions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    status = Column(String(30), default="pending")
+    triggered_by = Column(String(50), default="manual")
+    started_at = Column(TIMESTAMP, nullable=True)
+    completed_at = Column(TIMESTAMP, nullable=True)
+    result = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    pipeline = relationship("Pipeline", back_populates="executions")
+    execution_steps = relationship("PipelineExecutionStep", back_populates="execution",
+                                    cascade="all, delete-orphan")
+
+
+class PipelineExecutionStep(Base):
+    """Individual step result during pipeline execution."""
+    __tablename__ = "pipeline_execution_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    execution_id = Column(Integer, ForeignKey("pipeline_executions.id"), nullable=False, index=True)
+    step_id = Column(Integer, ForeignKey("pipeline_steps.id"), nullable=True)
+    step_order = Column(Integer, nullable=False)
+    step_type = Column(String(50), nullable=False)
+    status = Column(String(30), default="pending")
+    started_at = Column(TIMESTAMP, nullable=True)
+    completed_at = Column(TIMESTAMP, nullable=True)
+    input_data = Column(JSON, nullable=True)
+    output_data = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    execution = relationship("PipelineExecution", back_populates="execution_steps")
+
+
+class ToolIntegration(Base):
+    """External tool configurations (Cline, Playwright, SigNoz, etc.)."""
+    __tablename__ = "tool_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    tool_name = Column(String(100), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    config = Column(JSON, nullable=True)
+    credentials_encrypted = Column(Text, nullable=True)
+    status = Column(String(30), default="disconnected")
+    status_message = Column(Text, nullable=True)
+    version = Column(String(50), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
+class SDLCActivityLog(Base):
+    """Audit trail for all SDLC actions."""
+    __tablename__ = "sdlc_activity_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    stage_id = Column(Integer, ForeignKey("sdlc_stages.id"), nullable=True, index=True)
+    action = Column(String(100), nullable=False)
+    entity_type = Column(String(50), nullable=True)
+    entity_id = Column(Integer, nullable=True)
+    description = Column(Text, nullable=True)
+    log_metadata = Column("metadata", JSON, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    project = relationship("Project")
+    stage = relationship("SDLCStage")
